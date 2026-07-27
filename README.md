@@ -3,11 +3,12 @@
 Explore protein and RNA structure as molecular volume. Structural biologists can measure
 solvent-excluded envelopes, surface area, and shape with a rolling probe directly in the browser.
 
+[Run 3V in your browser](https://vosslab.github.io/vossvolvox-pages/)
+
 [Read the 3V publication](https://doi.org/10.1093/nar/gkq395)
 
-Volume Calculation is complete in this repository but is not currently available at a public web
-address. Volume Range, Channel Finder, Single Channel Extraction, Solvent Extraction, and Exit
-Tunnel Extraction remain visible in the tool selector as planned ports.
+Volume Calculation is complete. Volume Range, Channel Finder, Single Channel Extraction, Solvent
+Extraction, and Exit Tunnel Extraction remain visible in the tool selector as planned ports.
 
 ## Why internal volume matters
 
