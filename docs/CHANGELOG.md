@@ -80,6 +80,10 @@
 
 ### Fixes and Maintenance
 
+- Removed the Chromium installation and Playwright browser suite from the GitHub Pages deployment
+  path; the workflow now builds, runs the focused scientific parity gate, and publishes `dist/`.
+- Made Playwright's managed static server invoke Bash explicitly so Linux does not run the
+  `source source_me.sh` command through a `/bin/sh` implementation that lacks `source`.
 - Moved adaptive preview block summation, normalization, density statistics, and mode-2 MRC
   serialization from TypeScript into the Rust WebAssembly worker. TypeScript now only transfers
   the full-resolution and preview artifacts, so no application-owned JavaScript loop traverses
@@ -88,7 +92,8 @@
   C++ and Rust codebases.
 - Updated the GitHub Pages workflow seed to use current action majors and `npm ci`.
 - Scoped Pages write and OpenID Connect permissions to the deployment job.
-- Added source checks and the full Chromium suite as required pre-deployment gates.
+- Kept source checks as a required pre-deployment gate while leaving the Chromium suite behind its
+  explicit `run_playwright_tests.sh` command.
 - Made the Rust cache target explicit and retained active production deployments when newer
   commits enter the Pages concurrency group.
 - Added a self-contained translated-grid scientific parity and MRC2014 placement gate to the Pages

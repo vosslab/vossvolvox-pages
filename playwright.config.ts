@@ -14,7 +14,7 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: `source source_me.sh && python3 -m http.server ${PORT} --directory dist`,
+    command: `bash -lc 'source source_me.sh && python3 -m http.server ${PORT} --directory dist'`,
     url: `http://127.0.0.1:${PORT}/`,
     reuseExistingServer: false,
     timeout: 30_000,
