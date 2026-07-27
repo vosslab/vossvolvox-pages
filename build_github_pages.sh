@@ -8,15 +8,16 @@
 # Contract:
 #   - Wipes dist/ from scratch.
 #   - Type-checks via 'tsc --noEmit -p tsconfig.json'.
-#   - Resolves the entry: src/main.ts preferred, src/init.ts legacy fallback.
-#     Aborts with an actionable error if neither exists.
+#   - Requires src/main.ts as the browser entry point.
 #   - Verifies src/index.html and src/style.css exist before copying;
 #     aborts with an actionable error if missing.
 #   - Verifies src/index.html references dist/main.js with a module script
 #     tag (warns if missing -- the page will load but main.js is dead).
-#   - Bundles the entry into dist/main.js with esbuild (ESM, es2020,
-#     browser, minified, with sourcemap).
-#   - Copies src/index.html and src/style.css into dist/.
+#   - Builds the single-threaded Rust core for wasm32-unknown-unknown.
+#   - Bundles the page and Web Worker into dist/ with esbuild (ESM,
+#     es2020, browser, minified, with sourcemaps).
+#   - Copies the WebAssembly module into dist/.
+#   - Copies src/index.html, src/style.css, and the original tool images into dist/.
 #   - Writes dist/.nojekyll so GitHub Pages serves files starting with _.
 #   - Asserts dist/index.html and dist/main.js exist before exiting.
 #
@@ -25,19 +26,22 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-# Resolve entry point.
-if [ -f "src/main.ts" ]; then
-	ENTRY="src/main.ts"
-elif [ -f "src/init.ts" ]; then
-	ENTRY="src/init.ts"
-	echo "WARNING: using legacy src/init.ts. Rename to src/main.ts." >&2
-else
-	echo "ERROR: no entry point. Create src/main.ts (preferred) or src/init.ts." >&2
+# Verify the fixed entry point before any destructive step.
+if [ ! -f "src/main.ts" ]; then
+	echo "ERROR: browser entry point missing: src/main.ts" >&2
 	exit 1
 fi
 
 # Verify required static assets before any destructive step.
-for required in src/index.html src/style.css; do
+for required in \
+	src/index.html \
+	src/style.css \
+	src/img/volumeCalc.png \
+	src/img/volumeRange.png \
+	src/img/channelFinder.png \
+	src/img/channelExtract.png \
+	src/img/solventExtract.png \
+	src/img/tunnelExtract.png; do
 	if [ ! -f "$required" ]; then
 		echo "ERROR: required source file missing: $required" >&2
 		case "$required" in
@@ -57,25 +61,47 @@ if ! grep -Eq '<script[^>]+type="module"[^>]+src="(\./)?main\.js"' src/index.htm
 	echo "  Build will proceed; the page may render but main.js will not run." >&2
 fi
 
+if ! command -v cargo >/dev/null 2>&1; then
+	echo "ERROR: cargo not found. Install Rust before building the WASM engine." >&2
+	exit 1
+fi
+
+if ! rustup target list --installed | grep -qx 'wasm32-unknown-unknown'; then
+	echo "ERROR: Rust target wasm32-unknown-unknown is not installed." >&2
+	echo "  Run: rustup target add wasm32-unknown-unknown" >&2
+	exit 1
+fi
+
 rm -rf dist
 mkdir -p dist
 
+cargo build \
+	--manifest-path wasm/Cargo.toml \
+	--target wasm32-unknown-unknown \
+	--release \
+	--locked
+
 npx tsc --noEmit -p tsconfig.json
 
-npx esbuild "$ENTRY" \
+npx esbuild src/main.ts src/volume_worker.ts \
 	--bundle \
 	--format=esm \
 	--target=es2020 \
 	--platform=browser \
 	--minify \
 	--sourcemap \
-	--outfile=dist/main.js
+	--outdir=dist
 
 cp src/index.html dist/index.html
 cp src/style.css dist/style.css
+cp -R src/img dist/img
+cp wasm/target/wasm32-unknown-unknown/release/vossvolvox_wasm.wasm \
+	dist/vossvolvox_wasm.wasm
 touch dist/.nojekyll
 
 test -f dist/index.html
 test -f dist/main.js
+test -f dist/volume_worker.js
+test -f dist/vossvolvox_wasm.wasm
 
 echo "Built dist/ (GitHub Pages-ready)."

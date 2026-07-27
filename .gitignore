@@ -16,6 +16,7 @@ site/
 
 # === TYPESCRIPT ===
 node_modules/
+/wasm/target/
 dist_*/
 _site/
 *.tsbuildinfo
@@ -27,5 +28,4 @@ blob-report/
 coverage/
 meta.json
 stats.html
-
 

@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Calculate protein volume and surface area entirely in your browser with vossvolvox WebAssembly."
+    />
+    <title>3vee molecular volume tools</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <button
+      id="theme-toggle"
+      class="theme-toggle"
+      type="button"
+      aria-pressed="false"
+    >
+      Light mode
+    </button>
+    <main>
+      <section id="tool-selector-panel" class="page-shell tool-selector">
+        <div class="selector-intro">
+          <h1>3vee molecular volume tools</h1>
+          <p>Browser-based volume assessment and internal-volume extraction for PDB structures.</p>
+          <p class="privacy-note">
+            Calculations run locally with single-threaded WebAssembly. No coordinate upload server
+            is used.
+          </p>
+        </div>
+
+        <div class="tool-groups">
+          <section class="tool-group">
+            <h2>External volumes</h2>
+            <div class="tool-grid">
+              <a class="tool-option available" href="#volume">
+                <img src="img/volumeCalc.png" alt="" width="251" height="157" />
+                <strong>Volume Calculation</strong>
+                <span>Calculate structure volume for a selected solvent-probe radius.</span>
+                <small>Available</small>
+              </a>
+              <article class="tool-option pending">
+                <img src="img/volumeRange.png" alt="" width="251" height="157" />
+                <strong>Volume Range</strong>
+                <span>Calculate structure volume across a range of probe radii.</span>
+                <small>Port pending</small>
+              </article>
+            </div>
+          </section>
+
+          <section class="tool-group">
+            <h2>Internal volumes</h2>
+            <div class="tool-grid">
+              <article class="tool-option pending">
+                <img src="img/channelFinder.png" alt="" width="251" height="157" />
+                <strong>Channel Finder</strong>
+                <span>Find and extract major channels based on their size.</span>
+                <small>Port pending</small>
+              </article>
+              <article class="tool-option pending">
+                <img src="img/channelExtract.png" alt="" width="251" height="157" />
+                <strong>Single Channel Extraction</strong>
+                <span>Extract a channel near a known x, y, z coordinate.</span>
+                <small>Port pending</small>
+              </article>
+              <article class="tool-option pending">
+                <img src="img/solventExtract.png" alt="" width="251" height="157" />
+                <strong>Solvent Extraction</strong>
+                <span>Extract all solvent-accessible internal volume from a structure.</span>
+                <small>Port pending</small>
+              </article>
+              <article class="tool-option pending">
+                <img src="img/tunnelExtract.png" alt="" width="251" height="157" />
+                <strong>Exit Tunnel Extraction</strong>
+                <span>Extract the polypeptide exit tunnel from a 50S ribosomal subunit.</span>
+                <small>Port pending</small>
+              </article>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="setup-panel" class="page-shell" hidden>
+        <div class="tool-intro">
+          <a class="tool-back" href="#">&larr; All tools</a>
+          <h1>Volume Calculation</h1>
+          <p>
+            Voxel-based solvent-excluded volume and surface-area calculation for PDB coordinates.
+          </p>
+          <p class="privacy-note">
+            Single-threaded WebAssembly; coordinate data and results remain in this browser.
+          </p>
+        </div>
+
+        <form id="volume-form" class="calculation-card">
+          <div class="form-columns">
+            <section class="form-section">
+              <div class="card-heading">
+                <div>
+                  <h2>Structure</h2>
+                  <p>RCSB accession or a local PDB coordinate file.</p>
+                </div>
+              </div>
+
+              <div class="segmented-control" role="radiogroup" aria-label="Input source">
+                <label>
+                  <input id="mode-rcsb" type="radio" name="input-mode" value="rcsb" checked />
+                  <span>RCSB PDB ID</span>
+                </label>
+                <label>
+                  <input type="radio" name="input-mode" value="upload" />
+                  <span>Upload file</span>
+                </label>
+              </div>
+
+              <div class="input-panel" data-input-panel="rcsb">
+                <label for="pdb-id">
+                  PDB ID
+                  <span
+                    class="help-tip"
+                    tabindex="0"
+                    aria-label="Enter a PDB ID and the program will download the structure from the Protein Data Bank and process it."
+                    data-tooltip="Enter a PDB ID and the program will download the structure from the Protein Data Bank and process it."
+                    >?</span
+                  >
+                </label>
+                <div class="input-with-hint">
+                  <input
+                    id="pdb-id"
+                    name="pdb-id"
+                    type="text"
+                    aria-label="PDB ID"
+                    inputmode="text"
+                    autocomplete="off"
+                    maxlength="4"
+                    value="2LYZ"
+                    placeholder="2LYZ"
+                  />
+                  <span>Four characters</span>
+                </div>
+                <label class="check-row">
+                  <input
+                    id="biological-unit"
+                    type="checkbox"
+                    aria-label="Use biological assembly 1"
+                  />
+                  <span>
+                    <strong>
+                      Use biological assembly 1
+                      <span
+                        class="help-tip"
+                        tabindex="0"
+                        aria-label="The biological assembly is the macromolecular assembly believed to be functional, rather than necessarily the crystallographic asymmetric unit."
+                        data-tooltip="The biological assembly is the macromolecular assembly believed to be functional, rather than necessarily the crystallographic asymmetric unit."
+                        >?</span
+                      >
+                    </strong>
+                    <small
+                      >Downloads the first RCSB biological unit instead of the asymmetric
+                      unit.</small
+                    >
+                  </span>
+                </label>
+              </div>
+
+              <div class="input-panel" data-input-panel="upload" hidden>
+                <label for="pdb-file">
+                  PDB file
+                  <span
+                    class="help-tip"
+                    tabindex="0"
+                    aria-label="Select a PDB file on this computer. The browser reads it locally."
+                    data-tooltip="Select a PDB file on this computer. The browser reads it locally."
+                    >?</span
+                  >
+                </label>
+                <input
+                  id="pdb-file"
+                  type="file"
+                  accept=".pdb,chemical/x-pdb,text/plain"
+                  aria-label="PDB file"
+                />
+                <p class="field-note">Maximum 30 MB. The file is read locally by your browser.</p>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="card-heading">
+                <div>
+                  <h2>Parameters</h2>
+                  <p>Probe radius, voxel spacing, and coordinate-record filters.</p>
+                </div>
+              </div>
+
+              <div class="parameter-grid">
+                <label for="probe-radius">
+                  <span>
+                    Probe radius
+                    <span
+                      class="help-tip"
+                      tabindex="0"
+                      aria-label="Radius of a virtual ball rolled along the macromolecule."
+                      data-tooltip="Radius of a virtual ball rolled along the macromolecule."
+                      >?</span
+                    >
+                  </span>
+                  <span class="unit-input">
+                    <input
+                      id="probe-radius"
+                      type="number"
+                      aria-label="Probe radius"
+                      value="1.5"
+                      min="0"
+                      max="20"
+                      step="0.1"
+                      required
+                    />
+                    <abbr title="angstrom">&Aring;</abbr>
+                  </span>
+                  <small>Radius of the spherical solvent probe.</small>
+                </label>
+
+                <label for="grid-size">
+                  <span>
+                    Grid spacing
+                    <span
+                      class="help-tip"
+                      tabindex="0"
+                      aria-label="Volumes are calculated on a three-dimensional grid. Crude is 2.0 angstroms, Low is 1.0 angstrom, Medium is 0.75 angstrom, and High is 0.5 angstrom voxel spacing."
+                      data-tooltip="Volumes are calculated on a three-dimensional grid. Crude is 2.0 angstroms, Low is 1.0 angstrom, Medium is 0.75 angstrom, and High is 0.5 angstrom voxel spacing."
+                      >?</span
+                    >
+                  </span>
+                  <select id="grid-size" aria-label="Grid spacing">
+                    <option value="2">Crude - 2.00 &Aring;</option>
+                    <option value="1">Low - 1.00 &Aring;</option>
+                    <option value="0.75">Medium - 0.75 &Aring;</option>
+                    <option value="0.5" selected>High - 0.50 &Aring;</option>
+                  </select>
+                  <small>Lower spacing increases resolution, runtime, and memory use.</small>
+                </label>
+              </div>
+
+              <div class="filter-grid">
+                <label class="check-row compact">
+                  <input id="include-hetatm" type="checkbox" aria-label="Include HETATM records" />
+                  <span>
+                    <strong>
+                      Include HETATM records
+                      <span
+                        class="help-tip"
+                        tabindex="0"
+                        aria-label="Include non-protein and non-RNA HETATM records such as ligands, water, and ions. Water remains excluded while Exclude water molecules is selected."
+                        data-tooltip="Include non-protein and non-RNA HETATM records such as ligands, water, and ions. Water remains excluded while Exclude water molecules is selected."
+                        >?</span
+                      >
+                    </strong>
+                    <small>Keep ligands, ions, and other non-polymer atoms.</small>
+                  </span>
+                </label>
+                <label class="check-row compact">
+                  <input
+                    id="exclude-water"
+                    type="checkbox"
+                    checked
+                    aria-label="Exclude water molecules"
+                  />
+                  <span>
+                    <strong>Exclude water molecules</strong>
+                    <small>Applies when HETATM records are included.</small>
+                  </span>
+                </label>
+              </div>
+
+              <div class="preset-row" aria-label="Preset examples">
+                <span>2LYZ presets:</span>
+                <button
+                  type="button"
+                  class="preset"
+                  data-preset-id="2LYZ"
+                  data-preset-probe="1.5"
+                  data-preset-grid="0.5"
+                >
+                  Lysozyme - Solvent Excluded
+                </button>
+                <button
+                  type="button"
+                  class="preset"
+                  data-preset-id="2LYZ"
+                  data-preset-probe="6"
+                  data-preset-grid="0.5"
+                >
+                  Lysozyme - Shell
+                </button>
+                <button
+                  type="button"
+                  class="preset"
+                  data-preset-id="1JJ2"
+                  data-preset-probe="6"
+                  data-preset-grid="2"
+                >
+                  50S Ribosomal Subunit
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <div class="action-row">
+            <div class="limit-note">
+              <strong>64-million bounding-grid limit</strong>
+              <span>Use a coarser grid for larger structures.</span>
+            </div>
+            <button id="calculate-button" class="primary-button" type="submit">
+              Calculate volume
+              <span aria-hidden="true">&rarr;</span>
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section id="running-panel" class="page-shell state-panel" hidden aria-live="polite">
+        <h1>Building the molecular volume...</h1>
+        <p id="progress-label">Preparing the Volume calculation...</p>
+        <div class="progress-track"><div class="progress-bar"></div></div>
+        <output id="console-output" class="console" aria-label="Calculation log"></output>
+        <button id="cancel-button" class="secondary-button" type="button">
+          Cancel calculation
+        </button>
+      </section>
+
+      <section id="results-panel" class="page-shell" hidden>
+        <div class="results-heading">
+          <div>
+            <a class="tool-back" href="#">&larr; All tools</a>
+            <h1 id="result-input">Volume results</h1>
+            <p>Completed in <span id="elapsed-output"></span> entirely in this browser.</p>
+          </div>
+          <button id="new-calculation" class="secondary-button" type="button">
+            New calculation
+          </button>
+        </div>
+
+        <div class="result-layout">
+          <section class="viewer-card">
+            <div class="viewer-toolbar">
+              <div>
+                <label><input id="surface-toggle" type="checkbox" checked /> Surface</label>
+                <label><input id="molecule-toggle" type="checkbox" checked /> Molecule</label>
+              </div>
+              <div>
+                <label for="surface-opacity">Surface opacity</label>
+                <input
+                  id="surface-opacity"
+                  type="range"
+                  min="0.05"
+                  max="1"
+                  step="0.05"
+                  value="0.35"
+                  aria-describedby="surface-opacity-value"
+                />
+                <output id="surface-opacity-value" for="surface-opacity">35%</output>
+                <button id="recenter-button" type="button">Recenter</button>
+                <button id="fullscreen-button" type="button">Fullscreen</button>
+              </div>
+            </div>
+            <div id="viewer" aria-label="Interactive molecule and volume surface"></div>
+            <p class="viewer-help">Drag to rotate. Scroll to zoom. Right-drag to pan.</p>
+          </section>
+
+          <aside class="stats-card">
+            <h2>Volume information</h2>
+            <dl class="primary-stats">
+              <div>
+                <dt>
+                  Volume
+                  <span
+                    class="help-tip"
+                    tabindex="0"
+                    aria-label="Total object volume in cubic angstroms, determined from the occupied voxels."
+                    data-tooltip="Total object volume in cubic angstroms, determined from the occupied voxels."
+                    >?</span
+                  >
+                </dt>
+                <dd id="result-volume"></dd>
+              </div>
+              <div>
+                <dt>
+                  Surface area
+                  <span
+                    class="help-tip"
+                    tabindex="0"
+                    aria-label="Object surface area in square angstroms, estimated from the exposed voxel-face and edge configurations."
+                    data-tooltip="Object surface area in square angstroms, estimated from the exposed voxel-face and edge configurations."
+                    >?</span
+                  >
+                </dt>
+                <dd id="result-surface"></dd>
+              </div>
+              <div>
+                <dt>
+                  Sphericity
+                  <span
+                    class="help-tip"
+                    tabindex="0"
+                    aria-label="Measure of resemblance to a sphere. A perfect sphere is 1.0 and a cube is about 0.81. Psi equals the cube root of 36 pi V&sup2;, divided by A."
+                    data-tooltip="Measure of resemblance to a sphere. A perfect sphere is 1.0 and a cube is about 0.81. Psi = cube root of (36 pi V&sup2;) / A."
+                    >?</span
+                  >
+                </dt>
+                <dd id="result-sphericity"></dd>
+              </div>
+              <div>
+                <dt>
+                  Effective radius
+                  <span
+                    class="help-tip"
+                    tabindex="0"
+                    aria-label="Radius of a sphere with the same surface-area-to-volume ratio as this object. Effective radius equals 3 V divided by A."
+                    data-tooltip="Radius of a sphere with the same surface-area-to-volume ratio as this object. R_eff = 3 V / A."
+                    >?</span
+                  >
+                </dt>
+                <dd id="result-radius"></dd>
+              </div>
+            </dl>
+            <dl class="detail-stats">
+              <div>
+                <dt>
+                  Center of mass
+                  <span
+                    class="help-tip"
+                    tabindex="0"
+                    aria-label="Average position of all occupied voxels. This point is not necessarily inside the volume."
+                    data-tooltip="Average position of all occupied voxels. This point is not necessarily inside the volume."
+                    >?</span
+                  >
+                </dt>
+                <dd id="result-center"></dd>
+              </div>
+              <div>
+                <dt>Atoms</dt>
+                <dd id="result-atoms"></dd>
+              </div>
+              <div>
+                <dt>Filled voxels</dt>
+                <dd id="result-voxels"></dd>
+              </div>
+              <div>
+                <dt>Bounding-grid voxels</dt>
+                <dd id="result-total-voxels"></dd>
+              </div>
+              <div>
+                <dt>Grid dimensions</dt>
+                <dd id="result-grid"></dd>
+              </div>
+              <div>
+                <dt>Grid spacing</dt>
+                <dd id="result-spacing"></dd>
+              </div>
+              <div>
+                <dt>Probe radius</dt>
+                <dd id="result-probe"></dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+
+        <section class="downloads-card">
+          <div>
+            <h2>Download results</h2>
+          </div>
+          <div class="download-grid">
+            <a id="download-mrc" href="#">
+              <strong>MRC density map</strong>
+              <span>Binary occupancy map for ChimeraX, NGL, and other tools</span>
+            </a>
+            <a id="download-json" href="#">
+              <strong>JSON report</strong>
+              <span>Parameters, statistics, dimensions, and origin</span>
+            </a>
+            <a id="download-pdb" href="#">
+              <strong>Input PDB</strong>
+              <span>The exact structure used for this calculation</span>
+            </a>
+          </div>
+        </section>
+      </section>
+
+      <section id="error-panel" class="page-shell state-panel" hidden role="alert">
+        <div class="error-mark" aria-hidden="true">!</div>
+        <p class="eyebrow">Calculation stopped safely</p>
+        <h1>This run needs attention.</h1>
+        <p id="error-message"></p>
+        <button id="retry-button" class="primary-button" type="button">Adjust inputs</button>
+      </section>
+    </main>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

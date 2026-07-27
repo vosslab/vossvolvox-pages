@@ -1,0 +1,19 @@
+[package]
+name = "vossvolvox-wasm"
+version = "26.7.0"
+edition = "2024"
+rust-version = "1.85"
+license = "LGPL-3.0-or-later"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+vossvolvox = { git = "https://github.com/vosslab/vossvolvox-rust.git", tag = "v26.07" }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

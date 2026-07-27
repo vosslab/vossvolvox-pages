@@ -1,34 +1,39 @@
 {
-	"name": "vossvolvox-pages",
-	"version": "2026.07.0",
-	"type": "module",
-	"private": true,
-	"scripts": {
-		"setup": "./devel/setup_typescript.sh",
-		"setup:playwright": "./devel/setup_playwright.sh",
-		"build": "./build_github_pages.sh",
-		"serve": "./run_web_server.sh",
-		"check": "./check_codebase.sh",
-		"clean": "./dist_clean.sh",
-		"format:write": "npx prettier --write '**/*.{ts,tsx,mts,cts,js,mjs,cjs}'",
-		"test:playwright": "./run_playwright_tests.sh"
-	},
-	"devDependencies": {
-		"@types/node": ">=26.0.1",
-		"esbuild": ">=0.28.1",
-		"typescript": ">=6.0.3",
-		"eslint": ">=10.6.0",
-		"@eslint/js": ">=10.0.1",
-		"typescript-eslint": ">=8.62.1",
-		"globals": ">=17.7.0",
-		"playwright": ">=1.61.1",
-		"prettier": ">=3.9.4",
-		"tsx": ">=4.22.4",
-		"@playwright/test": ">=1.61.1"
-	},
-	"allowScripts": {
-		"esbuild@0.28.1": true,
-		"fsevents@2.3.2": true,
-		"fsevents@2.3.3": true
-	}
+  "name": "vossvolvox-pages",
+  "version": "2026.07.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "setup": "./devel/setup_typescript.sh",
+    "setup:playwright": "./devel/setup_playwright.sh",
+    "build": "./build_github_pages.sh",
+    "serve": "./run_web_server.sh",
+    "check": "./check_codebase.sh",
+    "clean": "./devel/clean_build.sh",
+    "format:write": "npx prettier --write '**/*.{ts,tsx,mts,cts,js,mjs,cjs}'",
+    "test:parity": "node tests/e2e/e2e_volume_parity.mjs",
+    "test:playwright": "./run_playwright_tests.sh"
+  },
+  "devDependencies": {
+    "@eslint/js": ">=10.0.1",
+    "@playwright/test": ">=1.62.0",
+    "@types/node": ">=26.1.1",
+    "esbuild": ">=0.28.1",
+    "eslint": ">=10.8.0",
+    "globals": ">=17.8.0",
+    "playwright": ">=1.62.0",
+    "prettier": ">=3.9.6",
+    "tsx": ">=4.23.1",
+    "typescript": ">=6.0.2 <7",
+    "typescript-eslint": ">=8.65.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "fsevents@2.3.2": true,
+    "fsevents@2.3.3": true,
+    "@scarf/scarf@1.4.0": true
+  },
+  "dependencies": {
+    "ngl": ">=2.4.0"
+  }
 }
