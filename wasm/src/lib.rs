@@ -7,8 +7,10 @@ use vossvolvox::voxel_grid::pdb::{Filters, PdbOptions, load_atoms_from_reader};
 use vossvolvox::voxel_grid::raster::Atom;
 
 const MAX_GRID_VOXELS: usize = 64_000_000;
+const MAX_FULL_RESOLUTION_PREVIEW_VOXELS: usize = 8_000_000;
 const MRC_HEADER_BYTES: usize = 1024;
 const MRC_MODE_SIGNED_BYTE: i32 = 0;
+const MRC_MODE_FLOAT: i32 = 2;
 const MRC_SPACE_GROUP: i32 = 1;
 const MRC_EXTRA_HEADER_WORDS: usize = 25;
 const MRC_VERSION_EXTRA_INDEX: usize = 3;
@@ -20,6 +22,34 @@ const MRC_LABEL: &[u8] = b"MRC2014: ORIGIN used for placement; NSTART zeroed";
 thread_local! {
     static RESULT_JSON: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static RESULT_MRC: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static RESULT_PREVIEW_MRC: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
+
+struct MrcHeader {
+    dimensions: [usize; 3],
+    sampling: [usize; 3],
+    cell: [f32; 3],
+    mode: i32,
+    origin: [f32; 3],
+    minimum: f32,
+    maximum: f32,
+    mean: f32,
+    rms: f32,
+}
+
+struct PreviewMrc {
+    bytes: Vec<u8>,
+    bin_factor: usize,
+    isolevel: f32,
+    grid_size: f32,
+    dimensions: [usize; 3],
+    origin: [f32; 3],
+}
+
+struct CalculationArtifacts {
+    json: Vec<u8>,
+    mrc: Vec<u8>,
+    preview_mrc: Vec<u8>,
 }
 
 #[unsafe(no_mangle)]
@@ -41,6 +71,7 @@ pub unsafe extern "C" fn wasm_calculate(
     grid_size: f32,
     include_hetatm: i32,
     exclude_water: i32,
+    fill_internal_cavities: i32,
 ) -> i32 {
     let input_slice = std::ptr::slice_from_raw_parts_mut(input_pointer, input_length);
     let input = unsafe { Box::from_raw(input_slice) };
@@ -50,16 +81,17 @@ pub unsafe extern "C" fn wasm_calculate(
         grid_size,
         include_hetatm != 0,
         exclude_water != 0,
+        fill_internal_cavities != 0,
     );
 
     match calculation {
-        Ok((json, mrc)) => {
-            store_results(json, mrc);
+        Ok(artifacts) => {
+            store_results(artifacts.json, artifacts.mrc, artifacts.preview_mrc);
             0
         }
         Err(message) => {
             let json = format!("{{\"ok\":false,\"error\":\"{}\"}}", escape_json(&message));
-            store_results(json.into_bytes(), Vec::new());
+            store_results(json.into_bytes(), Vec::new(), Vec::new());
             1
         }
     }
@@ -85,18 +117,29 @@ pub extern "C" fn wasm_mrc_length() -> usize {
     RESULT_MRC.with(|result| result.borrow().len())
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn wasm_preview_mrc_pointer() -> *const u8 {
+    RESULT_PREVIEW_MRC.with(|result| result.borrow().as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wasm_preview_mrc_length() -> usize {
+    RESULT_PREVIEW_MRC.with(|result| result.borrow().len())
+}
+
 fn calculate_volume(
     input: &[u8],
     probe: f32,
     grid_size: f32,
     include_hetatm: bool,
     exclude_water: bool,
-) -> Result<(Vec<u8>, Vec<u8>), String> {
+    fill_internal_cavities: bool,
+) -> Result<CalculationArtifacts, String> {
     if !probe.is_finite() || !(0.0..=20.0).contains(&probe) {
         return Err("Probe radius must be between 0 and 20 A.".to_string());
     }
-    if !grid_size.is_finite() || !(0.5..=2.0).contains(&grid_size) {
-        return Err("Grid spacing must be between 0.5 and 2.0 A.".to_string());
+    if !grid_size.is_finite() || grid_size <= 0.0 {
+        return Err("Grid spacing must be greater than 0 A.".to_string());
     }
     if input.is_empty() {
         return Err("The PDB input is empty.".to_string());
@@ -119,8 +162,16 @@ fn calculate_volume(
         return Err("The selected filters leave fewer than three valid atoms.".to_string());
     }
 
-    let params = GridParams::from_atoms(&atoms, probe, grid_size)
-        .ok_or_else(|| "The input could not produce a valid voxel grid.".to_string())?;
+    let padding_probe = if fill_internal_cavities {
+        probe * 2.0
+    } else {
+        probe
+    };
+    let params = GridParams::from_atoms(&atoms, padding_probe, grid_size).ok_or_else(|| {
+        "The requested spacing produces a grid beyond the browser limit or index range. \
+         Choose a coarser grid or a smaller structure."
+            .to_string()
+    })?;
     let total_voxels = params
         .len_i
         .checked_mul(params.len_j)
@@ -137,6 +188,7 @@ fn calculate_volume(
 
     let mut voxel_grid = params.build_grid();
     fill_accessible_sequential(&mut voxel_grid, &atoms, probe);
+    let cavity_voxels_filled = fill_cavities_if_requested(&mut voxel_grid, fill_internal_cavities);
     if probe > 0.0 {
         contract_exclusion_sequential(&mut voxel_grid, probe);
     }
@@ -152,6 +204,7 @@ fn calculate_volume(
     let effective_radius = 3.0 * volume / surface_area;
     let center = center_of_mass(&voxel_grid, voxel_count);
     let mrc = write_mrc_bytes(&voxel_grid)?;
+    let preview = write_preview_mrc(&voxel_grid)?;
 
     let json = format!(
         concat!(
@@ -161,7 +214,13 @@ fn calculate_volume(
             "\"center\":{{\"x\":{:.6},\"y\":{:.6},\"z\":{:.6}}},",
             "\"dimensions\":{{\"x\":{},\"y\":{},\"z\":{}}},",
             "\"origin\":{{\"x\":{:.6},\"y\":{:.6},\"z\":{:.6}}},",
-            "\"gridSize\":{:.6},\"probe\":{:.6},\"mrcBytes\":{}}}"
+            "\"gridSize\":{:.6},\"probe\":{:.6},",
+            "\"fillInternalCavities\":{},\"cavityVoxelsFilled\":{},\"mrcBytes\":{},",
+            "\"previewBinFactor\":{},\"previewIsolevel\":{:.6},",
+            "\"previewGridSize\":{:.6},",
+            "\"previewDimensions\":{{\"x\":{},\"y\":{},\"z\":{}}},",
+            "\"previewOrigin\":{{\"x\":{:.6},\"y\":{:.6},\"z\":{:.6}}},",
+            "\"previewMrcBytes\":{}}}"
         ),
         atoms.len(),
         voxel_count,
@@ -181,9 +240,32 @@ fn calculate_volume(
         voxel_grid.z_shift,
         grid_size,
         probe,
+        fill_internal_cavities,
+        cavity_voxels_filled,
         mrc.len(),
+        preview.bin_factor,
+        preview.isolevel,
+        preview.grid_size,
+        preview.dimensions[0],
+        preview.dimensions[1],
+        preview.dimensions[2],
+        preview.origin[0],
+        preview.origin[1],
+        preview.origin[2],
+        preview.bytes.len(),
     );
-    Ok((json.into_bytes(), mrc))
+    Ok(CalculationArtifacts {
+        json: json.into_bytes(),
+        mrc,
+        preview_mrc: preview.bytes,
+    })
+}
+
+fn fill_cavities_if_requested(grid: &mut Grid3D, requested: bool) -> usize {
+    if !requested {
+        return 0;
+    }
+    grid.fill_cavities()
 }
 
 fn fill_accessible_sequential(grid: &mut Grid3D, atoms: &[Atom], probe: f32) {
@@ -322,28 +404,67 @@ fn write_mrc_bytes(grid: &Grid3D) -> Result<Vec<u8>, String> {
         .and_then(|size| size.checked_add(guard_bytes))
         .ok_or_else(|| "The MRC output size exceeds browser memory.".to_string())?;
     let mut output = Vec::<u8>::with_capacity(capacity);
+    output.extend_from_slice(&write_mrc_header(&MrcHeader {
+        dimensions: [grid.len_i, grid.len_j, grid.len_k],
+        sampling: [grid.len_i, grid.len_j, grid.len_k],
+        cell: [
+            grid.len_i as f32 * grid.grid_size,
+            grid.len_j as f32 * grid.grid_size,
+            grid.len_k as f32 * grid.grid_size,
+        ],
+        mode: MRC_MODE_SIGNED_BYTE,
+        origin: [grid.x_shift, grid.y_shift, grid.z_shift],
+        minimum: 0.0,
+        maximum: 0.0,
+        mean: 0.0,
+        rms: 0.0,
+    })?);
+    for bit in &grid.data {
+        output.push(u8::from(*bit));
+    }
+    output.resize(capacity, 0);
+    Ok(output)
+}
 
+fn write_mrc_header(header: &MrcHeader) -> Result<Vec<u8>, String> {
+    let dimensions = header
+        .dimensions
+        .map(|value| i32::try_from(value).map_err(|_| "An MRC dimension exceeds i32."));
+    let sampling = header
+        .sampling
+        .map(|value| i32::try_from(value).map_err(|_| "An MRC sampling count exceeds i32."));
+    let dimensions = [
+        dimensions[0].map_err(str::to_string)?,
+        dimensions[1].map_err(str::to_string)?,
+        dimensions[2].map_err(str::to_string)?,
+    ];
+    let sampling = [
+        sampling[0].map_err(str::to_string)?,
+        sampling[1].map_err(str::to_string)?,
+        sampling[2].map_err(str::to_string)?,
+    ];
+    let mut output = Vec::<u8>::with_capacity(MRC_HEADER_BYTES);
     // MRC2014 words 1-10: dimensions, signed-byte mode, zero NSTART, and sampling.
     for value in [
-        grid.len_i as i32,
-        grid.len_j as i32,
-        grid.len_k as i32,
-        MRC_MODE_SIGNED_BYTE,
+        dimensions[0],
+        dimensions[1],
+        dimensions[2],
+        header.mode,
         0,
         0,
         0,
-        grid.len_i as i32,
-        grid.len_j as i32,
-        grid.len_k as i32,
+        sampling[0],
+        sampling[1],
+        sampling[2],
     ] {
         output.extend_from_slice(&value.to_le_bytes());
     }
 
     // Words 11-18: orthogonal cell dimensions in Angstroms and XYZ axis mapping.
     for value in [
-        grid.len_i as f32 * grid.grid_size,
-        grid.len_j as f32 * grid.grid_size,
-        grid.len_k as f32 * grid.grid_size,
+        header.cell[0],
+        header.cell[1],
+        header.cell[2],
         90.0,
         90.0,
         90.0,
@@ -355,7 +476,7 @@ fn write_mrc_bytes(grid: &Grid3D) -> Result<Vec<u8>, String> {
     }
 
     // Words 19-24: density statistics, space group, and no symmetry payload.
-    for value in [0.0f32, 0.0, 0.0] {
+    for value in [header.minimum, header.maximum, header.mean] {
         output.extend_from_slice(&value.to_le_bytes());
     }
     output.extend_from_slice(&MRC_SPACE_GROUP.to_le_bytes());
@@ -373,14 +494,14 @@ fn write_mrc_bytes(grid: &Grid3D) -> Result<Vec<u8>, String> {
 
     // Words 50-52: ORIGIN is the first voxel's Cartesian position in Angstroms.
     // NSTART stays zero so NGL applies this translation exactly once.
-    for value in [grid.x_shift, grid.y_shift, grid.z_shift] {
+    for value in header.origin {
         output.extend_from_slice(&value.to_le_bytes());
     }
 
     // Words 53-56: file marker, little-endian stamp, RMS, and one label.
     output.extend_from_slice(&MRC_MAP_ID.to_le_bytes());
     output.extend_from_slice(&MRC_MACHINE_STAMP.to_le_bytes());
-    output.extend_from_slice(&0.0f32.to_le_bytes());
+    output.extend_from_slice(&header.rms.to_le_bytes());
     output.extend_from_slice(&1i32.to_le_bytes());
     let mut labels = [0u8; 800];
     labels[..MRC_LABEL.len()].copy_from_slice(MRC_LABEL);
@@ -388,11 +509,120 @@ fn write_mrc_bytes(grid: &Grid3D) -> Result<Vec<u8>, String> {
     if output.len() != MRC_HEADER_BYTES {
         return Err("The MRC header was not exactly 1024 bytes.".to_string());
     }
-    for bit in &grid.data {
-        output.push(u8::from(*bit));
-    }
-    output.resize(capacity, 0);
     Ok(output)
+}
+
+fn write_preview_mrc(grid: &Grid3D) -> Result<PreviewMrc, String> {
+    let dimensions = [grid.len_i, grid.len_j, grid.len_k];
+    let origin = [grid.x_shift, grid.y_shift, grid.z_shift];
+    if grid.total_voxels <= MAX_FULL_RESOLUTION_PREVIEW_VOXELS {
+        return Ok(PreviewMrc {
+            bytes: Vec::new(),
+            bin_factor: 1,
+            isolevel: 0.5,
+            grid_size: grid.grid_size,
+            dimensions,
+            origin,
+        });
+    }
+    write_binned_preview_mrc(grid, 2)
+}
+
+fn write_binned_preview_mrc(grid: &Grid3D, bin_factor: usize) -> Result<PreviewMrc, String> {
+    if bin_factor < 2
+        || grid.len_i % bin_factor != 0
+        || grid.len_j % bin_factor != 0
+        || grid.len_k % bin_factor != 0
+    {
+        return Err(format!(
+            "MRC preview dimensions must be divisible by bin factor {bin_factor}."
+        ));
+    }
+    let dimensions = [
+        grid.len_i / bin_factor,
+        grid.len_j / bin_factor,
+        grid.len_k / bin_factor,
+    ];
+    let voxel_count = dimensions[0]
+        .checked_mul(dimensions[1])
+        .and_then(|area| area.checked_mul(dimensions[2]))
+        .ok_or_else(|| "The preview voxel dimensions overflow browser memory.".to_string())?;
+    let data_bytes = voxel_count
+        .checked_mul(size_of::<f32>())
+        .ok_or_else(|| "The preview MRC output size exceeds browser memory.".to_string())?;
+    let capacity = MRC_HEADER_BYTES
+        .checked_add(data_bytes)
+        .ok_or_else(|| "The preview MRC output size exceeds browser memory.".to_string())?;
+    let source_plane = grid.len_i * grid.len_j;
+    let samples_per_voxel = bin_factor.pow(3);
+    let normalization = 1.0 / samples_per_voxel as f32;
+    let mut output = Vec::<u8>::with_capacity(capacity);
+    output.resize(MRC_HEADER_BYTES, 0);
+    let mut minimum = f32::INFINITY;
+    let mut maximum = f32::NEG_INFINITY;
+    let mut sum = 0.0f64;
+    let mut sum_squares = 0.0f64;
+
+    for target_k in 0..dimensions[2] {
+        for target_j in 0..dimensions[1] {
+            for target_i in 0..dimensions[0] {
+                let mut occupancy = 0usize;
+                for offset_k in 0..bin_factor {
+                    let source_k = target_k * bin_factor + offset_k;
+                    for offset_j in 0..bin_factor {
+                        let source_j = target_j * bin_factor + offset_j;
+                        for offset_i in 0..bin_factor {
+                            let source_i = target_i * bin_factor + offset_i;
+                            let source_index =
+                                source_i + source_j * grid.len_i + source_k * source_plane;
+                            occupancy += usize::from(grid.data[source_index]);
+                        }
+                    }
+                }
+                let value = occupancy as f32 * normalization;
+                output.extend_from_slice(&value.to_le_bytes());
+                minimum = minimum.min(value);
+                maximum = maximum.max(value);
+                sum += f64::from(value);
+                sum_squares += f64::from(value) * f64::from(value);
+            }
+        }
+    }
+
+    let mean = sum / voxel_count as f64;
+    let variance = (sum_squares / voxel_count as f64 - mean * mean).max(0.0);
+    let preview_grid_size = grid.grid_size * bin_factor as f32;
+    let origin_shift = (bin_factor as f32 - 1.0) * grid.grid_size / 2.0;
+    let origin = [
+        grid.x_shift + origin_shift,
+        grid.y_shift + origin_shift,
+        grid.z_shift + origin_shift,
+    ];
+    let header = write_mrc_header(&MrcHeader {
+        dimensions,
+        sampling: dimensions,
+        cell: [
+            grid.len_i as f32 * grid.grid_size,
+            grid.len_j as f32 * grid.grid_size,
+            grid.len_k as f32 * grid.grid_size,
+        ],
+        mode: MRC_MODE_FLOAT,
+        origin,
+        minimum,
+        maximum,
+        mean: mean as f32,
+        rms: variance.sqrt() as f32,
+    })?;
+    output[..MRC_HEADER_BYTES].copy_from_slice(&header);
+
+    Ok(PreviewMrc {
+        bytes: output,
+        bin_factor,
+        isolevel: 0.5,
+        grid_size: preview_grid_size,
+        dimensions,
+        origin,
+    })
 }
 
 fn bounded_floor(value: f32, length: usize) -> usize {
@@ -403,9 +633,10 @@ fn bounded_ceil(value: f32, length: usize) -> usize {
     (value.ceil() as isize).clamp(0, length as isize - 1) as usize
 }
 
-fn store_results(json: Vec<u8>, mrc: Vec<u8>) {
+fn store_results(json: Vec<u8>, mrc: Vec<u8>, preview_mrc: Vec<u8>) {
     RESULT_JSON.with(|result| *result.borrow_mut() = json);
     RESULT_MRC.with(|result| *result.borrow_mut() = mrc);
+    RESULT_PREVIEW_MRC.with(|result| *result.borrow_mut() = preview_mrc);
 }
 
 fn escape_json(text: &str) -> String {
@@ -422,4 +653,113 @@ fn escape_json(text: &str) -> String {
         }
     }
     escaped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        MRC_HEADER_BYTES, fill_cavities_if_requested, write_binned_preview_mrc, write_preview_mrc,
+    };
+    use vossvolvox::voxel_grid::grid::Grid3D;
+
+    fn hollow_cube_grid() -> Grid3D {
+        let mut grid = Grid3D::new(7, 7, 7, 1.0);
+        grid.set_voxel_ijk(0, 0, 0, true);
+        grid.set_voxel_ijk(6, 6, 6, true);
+        for k in 2..=4 {
+            for j in 2..=4 {
+                for i in 2..=4 {
+                    if (i, j, k) != (3, 3, 3) {
+                        grid.set_voxel_ijk(i, j, k, true);
+                    }
+                }
+            }
+        }
+        grid
+    }
+
+    #[test]
+    fn cavity_filling_is_opt_in() {
+        let mut preserved = hollow_cube_grid();
+        assert_eq!(fill_cavities_if_requested(&mut preserved, false), 0);
+        assert!(!preserved.get_voxel_ijk(3, 3, 3));
+
+        let mut filled = hollow_cube_grid();
+        assert_eq!(fill_cavities_if_requested(&mut filled, true), 1);
+        assert!(filled.get_voxel_ijk(3, 3, 3));
+    }
+
+    #[test]
+    fn preview_selection_keeps_small_grids_at_full_resolution() {
+        let grid = Grid3D::new(4, 4, 4, 0.5);
+        let preview = write_preview_mrc(&grid).unwrap();
+
+        assert_eq!(preview.bin_factor, 1);
+        assert!(preview.bytes.is_empty());
+        assert_eq!(preview.dimensions, [4, 4, 4]);
+        assert_eq!(preview.grid_size, 0.5);
+    }
+
+    #[test]
+    fn bin_two_normalizes_blocks_and_preserves_physical_extent() {
+        let mut grid = Grid3D::new(4, 4, 4, 0.5);
+        grid.x_shift = 10.0;
+        grid.y_shift = 20.0;
+        grid.z_shift = 30.0;
+        for k in 0..2 {
+            for j in 0..2 {
+                for i in 0..2 {
+                    grid.set_voxel_ijk(i, j, k, true);
+                }
+            }
+        }
+
+        let preview = write_binned_preview_mrc(&grid, 2).unwrap();
+        let header = &preview.bytes[..MRC_HEADER_BYTES];
+        let density = &preview.bytes[MRC_HEADER_BYTES..];
+
+        assert_eq!(preview.bin_factor, 2);
+        assert_eq!(preview.dimensions, [2, 2, 2]);
+        assert_eq!(preview.origin, [10.25, 20.25, 30.25]);
+        assert_eq!(preview.grid_size, 1.0);
+        assert_eq!(read_i32(header, 12), 2);
+        assert_eq!(
+            [
+                read_f32(header, 40),
+                read_f32(header, 44),
+                read_f32(header, 48)
+            ],
+            [2.0, 2.0, 2.0]
+        );
+        assert_eq!(
+            [
+                read_f32(header, 196),
+                read_f32(header, 200),
+                read_f32(header, 204)
+            ],
+            preview.origin
+        );
+        assert_eq!(read_f32(density, 0), 1.0);
+        for offset in (size_of::<f32>()..density.len()).step_by(size_of::<f32>()) {
+            assert_eq!(read_f32(density, offset), 0.0);
+        }
+    }
+
+    #[test]
+    fn binning_rejects_incomplete_edge_blocks() {
+        let grid = Grid3D::new(5, 4, 4, 0.5);
+        let error = write_binned_preview_mrc(&grid, 2)
+            .err()
+            .expect("non-divisible dimensions should fail");
+
+        assert!(error.contains("divisible by bin factor 2"));
+    }
+
+    fn read_i32(bytes: &[u8], offset: usize) -> i32 {
+        i32::from_le_bytes(bytes[offset..offset + size_of::<i32>()].try_into().unwrap())
+    }
+
+    fn read_f32(bytes: &[u8], offset: usize) -> f32 {
+        f32::from_le_bytes(bytes[offset..offset + size_of::<f32>()].try_into().unwrap())
+    }
 }

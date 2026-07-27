@@ -10,11 +10,14 @@ type WasmExports = {
     gridSize: number,
     includeHetatm: number,
     excludeWater: number,
+    fillInternalCavities: number,
   ): number;
   wasm_result_pointer(): number;
   wasm_result_length(): number;
   wasm_mrc_pointer(): number;
   wasm_mrc_length(): number;
+  wasm_preview_mrc_pointer(): number;
+  wasm_preview_mrc_length(): number;
 };
 
 let wasmPromise: Promise<WasmExports> | undefined;
@@ -42,6 +45,12 @@ function readJson(wasm: WasmExports): VolumeResult | VolumeFailure {
   return parsed;
 }
 
+function copyWasmBytes(wasm: WasmExports, pointer: number, length: number): ArrayBuffer {
+  const copy = new Uint8Array(length);
+  copy.set(new Uint8Array(wasm.memory.buffer, pointer, length));
+  return copy.buffer;
+}
+
 async function calculate(message: WorkerRequest): Promise<void> {
   post({ type: "progress", message: "Loading the Rust WebAssembly engine..." });
   const wasm = await loadWasm();
@@ -59,6 +68,7 @@ async function calculate(message: WorkerRequest): Promise<void> {
     message.request.gridSize,
     message.request.includeHetatm ? 1 : 0,
     message.request.excludeWater ? 1 : 0,
+    message.request.fillInternalCavities ? 1 : 0,
   );
 
   const result = readJson(wasm);
@@ -67,12 +77,14 @@ async function calculate(message: WorkerRequest): Promise<void> {
     return;
   }
 
-  post({ type: "progress", message: "Packaging the MRC density map..." });
-  const mrcPointer = wasm.wasm_mrc_pointer();
-  const mrcLength = wasm.wasm_mrc_length();
-  const mrc = new Uint8Array(mrcLength);
-  mrc.set(new Uint8Array(wasm.memory.buffer, mrcPointer, mrcLength));
-  post({ type: "result", result, mrc: mrc.buffer }, [mrc.buffer]);
+  post({ type: "progress", message: "Transferring the MRC density maps..." });
+  const mrc = copyWasmBytes(wasm, wasm.wasm_mrc_pointer(), wasm.wasm_mrc_length());
+  const previewMrc = copyWasmBytes(
+    wasm,
+    wasm.wasm_preview_mrc_pointer(),
+    wasm.wasm_preview_mrc_length(),
+  );
+  post({ type: "result", result, mrc, previewMrc }, [mrc, previewMrc]);
 }
 
 self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {

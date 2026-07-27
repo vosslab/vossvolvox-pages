@@ -3,6 +3,7 @@ import type { RepresentationElement } from "ngl";
 
 import type {
   InputMode,
+  MrcPreview,
   VolumeRequest,
   VolumeResult,
   WorkerRequest,
@@ -13,6 +14,7 @@ type CompletedRun = {
   request: VolumeRequest;
   result: VolumeResult;
   mrc: ArrayBuffer;
+  previewMrc: ArrayBuffer;
   elapsedSeconds: number;
 };
 
@@ -71,6 +73,7 @@ const opacityOutput = requireElement<HTMLOutputElement>("surface-opacity-value")
 const recenterButton = requireElement<HTMLButtonElement>("recenter-button");
 const fullscreenButton = requireElement<HTMLButtonElement>("fullscreen-button");
 const themeToggle = requireElement<HTMLButtonElement>("theme-toggle");
+const breadcrumbs = requireElement<HTMLElement>("breadcrumbs");
 
 let worker: Worker | undefined;
 let inputAbortController: AbortController | undefined;
@@ -188,15 +191,25 @@ function readNumber(id: string, minimum: number, maximum: number): number {
   return value;
 }
 
+function readPositiveNumber(id: string): number {
+  const input = requireElement<HTMLInputElement>(id);
+  const value = Number(input.value);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${input.labels?.[0]?.textContent ?? id} must be greater than 0.`);
+  }
+  return value;
+}
+
 async function buildRequest(signal: AbortSignal): Promise<VolumeRequest> {
   const input = await readInput(signal);
   const request: VolumeRequest = {
     pdbText: input.text,
     inputLabel: input.label,
     probe: readNumber("probe-radius", 0, 20),
-    gridSize: readNumber("grid-size", 0.5, 2),
+    gridSize: readPositiveNumber("grid-size"),
     includeHetatm: requireElement<HTMLInputElement>("include-hetatm").checked,
     excludeWater: requireElement<HTMLInputElement>("exclude-water").checked,
+    fillInternalCavities: requireElement<HTMLInputElement>("fill-internal-cavities").checked,
   };
   return request;
 }
@@ -216,7 +229,61 @@ function showPanel(panel: HTMLElement): void {
   for (const candidate of [toolSelectorPanel, setupPanel, runningPanel, resultsPanel, errorPanel]) {
     candidate.hidden = candidate !== panel;
   }
+  updateBreadcrumbs(panel);
   window.scrollTo({ top: 0 });
+}
+
+function updateBreadcrumbs(panel: HTMLElement): void {
+  if (panel === toolSelectorPanel) {
+    breadcrumbs.hidden = true;
+    breadcrumbs.replaceChildren();
+    return;
+  }
+
+  const list = document.createElement("ol");
+  const toolsItem = document.createElement("li");
+  const toolsLink = document.createElement("a");
+  toolsLink.href = "#";
+  toolsLink.textContent = "All tools";
+  toolsItem.append(toolsLink);
+  list.append(toolsItem);
+
+  const volumeItem = document.createElement("li");
+  if (panel === setupPanel) {
+    const current = document.createElement("span");
+    current.textContent = "Volume Calculation";
+    current.ariaCurrent = "page";
+    volumeItem.append(current);
+  } else {
+    const volumeLink = document.createElement("a");
+    volumeLink.href = "#volume";
+    volumeLink.textContent = "Volume Calculation";
+    volumeLink.addEventListener("click", (event) => {
+      event.preventDefault();
+      window.history.replaceState(null, "", "#volume");
+      resetForNewCalculation();
+    });
+    volumeItem.append(volumeLink);
+  }
+  list.append(volumeItem);
+
+  if (panel !== setupPanel) {
+    const stateItem = document.createElement("li");
+    const current = document.createElement("span");
+    current.ariaCurrent = "page";
+    if (panel === runningPanel) {
+      current.textContent = "Running";
+    } else if (panel === resultsPanel) {
+      current.textContent = "Results";
+    } else {
+      current.textContent = "Needs attention";
+    }
+    stateItem.append(current);
+    list.append(stateItem);
+  }
+
+  breadcrumbs.replaceChildren(list);
+  breadcrumbs.hidden = false;
 }
 
 function stopWorker(): void {
@@ -285,6 +352,7 @@ function handleWorkerMessage(response: WorkerResponse, request: VolumeRequest): 
     request,
     result: response.result,
     mrc: response.mrc,
+    previewMrc: response.previewMrc,
     elapsedSeconds,
   };
   appendConsole("Program completed successfully.");
@@ -335,11 +403,40 @@ async function renderResults(run: CompletedRun): Promise<void> {
   );
   setResultText("result-spacing", `${result.gridSize.toFixed(2)} ${ANGSTROM}`);
   setResultText("result-probe", `${result.probe.toFixed(2)} ${ANGSTROM}`);
+  const cavityTreatment = result.fillInternalCavities
+    ? `Filled (${formatInteger(result.cavityVoxelsFilled)} accessible-grid voxels)`
+    : "Not filled";
+  setResultText("result-cavities", cavityTreatment);
   elapsedOutput.textContent = `${run.elapsedSeconds.toFixed(2)} seconds`;
-  wireDownloads(run);
+  const preview = createMrcPreview(run);
+  viewerElement.dataset["previewBin"] = String(preview.binFactor);
+  const viewerResolution = requireElement<HTMLElement>("viewer-resolution");
+  viewerResolution.textContent =
+    preview.binFactor === 1
+      ? `Surface preview uses the full ${result.gridSize.toFixed(2)} ${ANGSTROM} grid.`
+      : `Surface preview is binned ${preview.binFactor}x to ${preview.spacing.toFixed(2)} ${ANGSTROM}; values and downloads remain full resolution.`;
   showPanel(resultsPanel);
-  await renderViewer(run);
+  await wireDownloads(run);
+  run.mrc = new ArrayBuffer(0);
+  run.previewMrc = new ArrayBuffer(0);
+  await renderViewer(run, preview);
   submitButton.disabled = false;
+}
+
+function createMrcPreview(run: CompletedRun): MrcPreview {
+  const result = run.result;
+  const mrc = result.previewBinFactor === 1 ? run.mrc : run.previewMrc;
+  if (mrc.byteLength === 0) {
+    throw new Error("The WASM engine did not return the required NGL preview map.");
+  }
+  return {
+    mrc,
+    binFactor: result.previewBinFactor,
+    isolevel: result.previewIsolevel,
+    spacing: result.previewGridSize,
+    origin: result.previewOrigin,
+    dimensions: result.previewDimensions,
+  };
 }
 
 function createDownload(id: string, blob: Blob, filename: string): void {
@@ -350,21 +447,44 @@ function createDownload(id: string, blob: Blob, filename: string): void {
   anchor.download = filename;
 }
 
-function wireDownloads(run: CompletedRun): void {
+async function gzipBlob(blob: Blob): Promise<Blob | undefined> {
+  if (typeof CompressionStream === "undefined") {
+    return undefined;
+  }
+  try {
+    const compressedStream = blob.stream().pipeThrough(new CompressionStream("gzip"));
+    const compressed = await new Response(compressedStream).blob();
+    return compressed.slice(0, compressed.size, "application/gzip");
+  } catch {
+    return undefined;
+  }
+}
+
+async function wireDownloads(run: CompletedRun): Promise<void> {
   for (const url of downloadUrls.splice(0)) {
     URL.revokeObjectURL(url);
   }
   const stem = run.request.inputLabel.replace(/\.pdb$/i, "").replace(/[^a-z0-9_-]+/gi, "_");
+  const volumeMethod = run.request.fillInternalCavities ? "volume-no-cav" : "volume";
   createDownload(
     "download-pdb",
     new Blob([run.request.pdbText], { type: "chemical/x-pdb" }),
     `${stem}.pdb`,
   );
-  createDownload(
-    "download-mrc",
-    new Blob([run.mrc], { type: "application/octet-stream" }),
-    `${stem}-volume.mrc`,
-  );
+  const rawMrc = new Blob([run.mrc], { type: "application/octet-stream" });
+  const compressedMrc = await gzipBlob(rawMrc);
+  const mrcLabel = requireElement<HTMLElement>("download-mrc-label");
+  const mrcDescription = requireElement<HTMLElement>("download-mrc-description");
+  if (compressedMrc === undefined) {
+    mrcLabel.textContent = "MRC density map";
+    mrcDescription.textContent = "Uncompressed occupancy map; gzip is unavailable in this browser";
+    createDownload("download-mrc", rawMrc, `${stem}-${volumeMethod}.mrc`);
+  } else {
+    mrcLabel.textContent = "MRC density map (.gz)";
+    mrcDescription.textContent =
+      "Gzip-compressed occupancy map; decompress if required by your viewer";
+    createDownload("download-mrc", compressedMrc, `${stem}-${volumeMethod}.mrc.gz`);
+  }
   const report = {
     input: run.request.inputLabel,
     elapsedSeconds: run.elapsedSeconds,
@@ -373,17 +493,18 @@ function wireDownloads(run: CompletedRun): void {
       gridSize: run.request.gridSize,
       includeHetatm: run.request.includeHetatm,
       excludeWater: run.request.excludeWater,
+      fillInternalCavities: run.request.fillInternalCavities,
     },
     results: run.result,
   };
   createDownload(
     "download-json",
     new Blob([JSON.stringify(report, undefined, 2)], { type: "application/json" }),
-    `${stem}-volume-results.json`,
+    `${stem}-${volumeMethod}-results.json`,
   );
 }
 
-async function renderViewer(run: CompletedRun): Promise<void> {
+async function renderViewer(run: CompletedRun, preview: MrcPreview): Promise<void> {
   stage?.dispose();
   const viewerTheme = VIEWER_THEMES[currentTheme()];
   stage = new Stage(viewerElement, {
@@ -408,16 +529,16 @@ async function renderViewer(run: CompletedRun): Promise<void> {
     colorScheme: "element",
   });
   const loadedSurface = await stage.loadFile(
-    new Blob([run.mrc], { type: "application/octet-stream" }),
+    new Blob([preview.mrc], { type: "application/octet-stream" }),
     { ext: "mrc", defaultRepresentation: false },
   );
   if (loadedSurface === undefined) {
     throw new Error("NGL did not return a volume component.");
   }
   surfaceComponent = loadedSurface;
-  verifyVolumePlacement(loadedSurface.object as NglVolumeObject, run.result);
+  verifyVolumePlacement(loadedSurface.object as NglVolumeObject, preview);
   surfaceRepresentation = loadedSurface.addRepresentation("surface", {
-    isolevel: 0.5,
+    isolevel: preview.isolevel,
     color: viewerTheme.surfaceColor,
     opacity: Number(opacityInput.value),
     depthWrite: false,
@@ -430,14 +551,14 @@ async function renderViewer(run: CompletedRun): Promise<void> {
   updateViewerVisibility();
 }
 
-function verifyVolumePlacement(volume: NglVolumeObject, result: VolumeResult): void {
+function verifyVolumePlacement(volume: NglVolumeObject, preview: MrcPreview): void {
   const elements = volume.matrix?.elements;
   if (elements === undefined || elements.length < 16) {
     throw new Error("NGL did not expose the density-map placement matrix.");
   }
   const parsedOrigin = [Number(elements[12]), Number(elements[13]), Number(elements[14])];
-  const expectedOrigin = [result.origin.x, result.origin.y, result.origin.z];
-  const tolerance = Math.max(result.gridSize * 0.0001, 0.00001);
+  const expectedOrigin = [preview.origin.x, preview.origin.y, preview.origin.z];
+  const tolerance = Math.max(preview.spacing * 0.0001, 0.00001);
   if (parsedOrigin.some((value, index) => Math.abs(value - expectedOrigin[index]!) > tolerance)) {
     throw new Error("NGL placed the density map at coordinates that differ from the WASM result.");
   }

@@ -1,7 +1,13 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-import { SMALL_PDB, TRANSLATED_PDB, calculateUploadedPdb, openVolumeTool } from "./helper_volume";
+import {
+  CAVITY_CAGE_PDB,
+  SMALL_PDB,
+  TRANSLATED_PDB,
+  calculateUploadedPdb,
+  openVolumeTool,
+} from "./helper_volume";
 
 // Selector contract:
 // - Theme and calculation controls: src/index.html (#theme-toggle, #volume-form)
@@ -20,6 +26,15 @@ test("tool selector uses the original 3vee artwork", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.locator('img[src="img/volumeCalc.png"]')).toBeVisible();
+});
+
+test("shared footer links the 3V publication", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("link", { name: "Publication" })).toHaveAttribute(
+    "href",
+    "https://doi.org/10.1093/nar/gkq395",
+  );
 });
 
 test("presets apply their scientific parameter sets", async ({ page }) => {
@@ -83,6 +98,20 @@ test("surface opacity control updates the NGL representation", async ({ page }) 
   await expect(page.locator("#viewer")).toHaveAttribute("data-surface-opacity", "0.1");
 });
 
+test("internal-cavity filling selects the VolumeNoCav result method", async ({ page }) => {
+  await page.goto("/");
+  await openVolumeTool(page);
+  await page.getByLabel("Fill internal cavities", { exact: true }).check();
+  await calculateUploadedPdb(page, CAVITY_CAGE_PDB, "0.5", "cavity-cage.pdb");
+
+  await expect(page.locator("#result-cavities")).toContainText("Filled (27");
+  await expect(page.locator("#result-volume")).toContainText("1,450");
+  await expect(page.getByRole("link", { name: /MRC density map/ })).toHaveAttribute(
+    "download",
+    "cavity-cage-volume-no-cav.mrc.gz",
+  );
+});
+
 test("NGL preserves the translated MRC origin", async ({ page }) => {
   await page.goto("/");
   await calculateUploadedPdb(page, TRANSLATED_PDB, "0.75");
@@ -97,6 +126,17 @@ test("new calculation returns to an enabled setup form", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Volume Calculation" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Calculate volume" })).toBeEnabled();
+});
+
+test("result breadcrumbs return to the Volume setup", async ({ page }) => {
+  await page.goto("/");
+  await calculateUploadedPdb(page);
+  await page
+    .getByRole("navigation", { name: "Breadcrumb" })
+    .getByText("Volume Calculation")
+    .click();
+
+  await expect(page.getByRole("heading", { name: "Volume Calculation" })).toBeVisible();
 });
 
 test("cancelling an in-flight RCSB fetch cannot resume the old calculation", async ({ page }) => {

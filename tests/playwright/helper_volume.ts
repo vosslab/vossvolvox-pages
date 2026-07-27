@@ -34,6 +34,38 @@ export const TRANSLATED_PDB = [
   "END",
 ].join("\n");
 
+export const LARGE_GRID_PDB = [
+  "ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00 20.00           N",
+  "ATOM      2  CA  ALA A   1       1.000   0.000   0.000  1.00 20.00           C",
+  "ATOM      3  C   ALA A   1       0.000   1.000   0.000  1.00 20.00           C",
+  "ATOM      4  N   GLY B   2     200.000 200.000 200.000  1.00 20.00           N",
+  "ATOM      5  CA  GLY B   2     199.000 200.000 200.000  1.00 20.00           C",
+  "ATOM      6  C   GLY B   2     200.000 199.000 200.000  1.00 20.00           C",
+  "END",
+].join("\n");
+
+export const CAVITY_CAGE_PDB = ((): string => {
+  const lines: string[] = [];
+  let serial = 1;
+  for (const z of [-4, 0, 4]) {
+    for (const y of [-4, 0, 4]) {
+      for (const x of [-4, 0, 4]) {
+        if (x === 0 && y === 0 && z === 0) {
+          continue;
+        }
+        const atomSerial = String(serial).padStart(5);
+        const residue = String(serial).padStart(4);
+        const coordinates = [x, y, z].map((value) => value.toFixed(3).padStart(8)).join("");
+        lines.push(
+          `ATOM  ${atomSerial}  CA  ALA A${residue}    ${coordinates}  1.00 20.00           C`,
+        );
+        serial += 1;
+      }
+    }
+  }
+  return [...lines, "END"].join("\n");
+})();
+
 export function capturePageErrors(page: Page): string[] {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));

@@ -104,10 +104,16 @@ html {
 }
 
 body {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
   margin: 0;
   color: var(--ink);
   background: var(--page);
+}
+
+main {
+  flex: 1;
 }
 
 .theme-toggle {
@@ -270,18 +276,48 @@ button {
   color: var(--accent-bright);
 }
 
-.tool-back {
-  display: inline-block;
-  margin-bottom: 10px;
-  color: var(--accent-bright);
+.breadcrumbs {
+  padding-block: 28px 0;
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.breadcrumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.breadcrumbs li {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.breadcrumbs li + li::before {
+  color: var(--muted);
+  content: "/";
+}
+
+.breadcrumbs a {
+  color: var(--accent-bright);
   text-decoration: none;
 }
 
-.tool-back:hover,
-.tool-back:focus-visible {
+.breadcrumbs a:hover,
+.breadcrumbs a:focus-visible {
   text-decoration: underline;
+}
+
+.breadcrumbs [aria-current="page"] {
+  color: var(--muted);
+}
+
+.breadcrumbs:not([hidden]) + main > .page-shell {
+  padding-top: 12px;
 }
 
 .tool-intro {
@@ -549,6 +585,10 @@ hr {
   background: var(--subtle-bg);
   border: 1px solid var(--subtle-border);
   border-radius: 12px;
+}
+
+.check-row.wide {
+  grid-column: 1 / -1;
 }
 
 .preset-row {
@@ -961,6 +1001,49 @@ hr {
   box-shadow: 0 0 40px var(--error-shadow);
 }
 
+.site-footer {
+  color: var(--muted);
+  background: var(--panel);
+  border-top: 2px solid var(--accent);
+}
+
+.footer-inner {
+  display: flex;
+  width: min(1180px, calc(100% - 40px));
+  min-height: 76px;
+  gap: 24px;
+  align-items: center;
+  justify-content: space-between;
+  margin-inline: auto;
+  padding-block: 15px;
+}
+
+.footer-links {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 18px;
+}
+
+.footer-links a {
+  color: var(--accent-bright);
+  font-size: 0.8rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.footer-links a:hover,
+.footer-links a:focus-visible {
+  text-decoration: underline;
+}
+
+.footer-inner p {
+  max-width: 720px;
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  text-align: right;
+}
+
 #error-message {
   max-width: 680px;
   margin-bottom: 28px;
@@ -998,6 +1081,14 @@ hr {
 
   .page-shell {
     padding-block: 24px 48px;
+  }
+
+  .breadcrumbs {
+    padding-block: 20px 0;
+  }
+
+  .breadcrumbs:not([hidden]) + main > .page-shell {
+    padding-top: 10px;
   }
 
   h1 {
@@ -1043,6 +1134,21 @@ hr {
   .results-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .footer-inner,
+  .footer-links {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .footer-inner {
+    width: min(100% - 24px, 1180px);
+    gap: 10px;
+  }
+
+  .footer-inner p {
+    text-align: left;
   }
 
   .primary-button,

@@ -23,13 +23,16 @@ their original artwork and port status rather than hidden.
 The page provides the complete Volume workflow rather than a thin WebAssembly demonstration:
 
 - Load an RCSB PDB entry or select a local PDB file.
-- Choose a probe radius, grid spacing, and HETATM/water filters.
+- Choose a probe radius, grid spacing, HETATM/water filters, and whether to fill internal cavities.
+- Select curated voxel spacing from 2.00 through 0.25 &Aring;; 0.50 &Aring; remains the default.
 - Use the original lysozyme and 50S ribosomal-subunit presets and ported 3vee help.
 - Calculate in a cancellable Web Worker so the interface stays responsive.
 - Inspect volume, surface area, sphericity, radius, center, atoms, and voxel counts.
 - Rotate the molecule and calculated volume surface in the NGL viewer.
 - Switch between persistent dark and light interface and NGL palettes.
-- Download the exact input, a full MRC occupancy map, and a JSON report.
+- Use shared breadcrumbs and project footer links to return to tools, source, or the publication.
+- Download the exact input, a gzip-compressed MRC occupancy map, and a JSON report.
+- Download results before reloading or closing the page; this static site stores no job history.
 
 ```text
 PDB form -> Web Worker -> Rust/WASM voxel engine -> statistics + NGL + downloads
@@ -76,13 +79,37 @@ The calculation stops before allocating a bounding grid above 64 million voxels.
 
 - Each computational grid is bit-packed: 64 million positions use about 8 MB.
 - Probe contraction has a bounded three-grid peak of about 24 MB.
-- The downloadable mode-0 MRC map stores one byte per grid position and can approach 64 MB.
+- Filling internal cavities also uses at most three simultaneous bit-packed grids, but its
+  double-probe padding can produce a larger bounding grid than ordinary Volume.
+- The mode-0 MRC map stores one byte per grid position before gzip compression and can approach
+  64 MB in browser memory. The downloaded `.mrc.gz` is usually much smaller, but compression does
+  not reduce NGL's working memory.
+- NGL previews maps through 8 million voxels at full resolution, then uses normalized block binning:
+  bin 2 reduces its dense map by 8-fold through the current 64-million limit. Numerical results
+  and the downloaded map always retain the selected grid.
 - The browser also holds WebAssembly memory, the input PDB, results, and NGL viewer data.
 
 For scale, the default 2LYZ calculation uses 1,444,352 bounding-grid positions, about 2.26% of the
 limit. The 64-million value is an allocation ceiling, not a promise that every accepted job will
 fit every browser and GPU. Large structures can use a coarser grid or smaller probe to reduce the
 bounding dimensions.
+
+The production WASM benchmark for 2LYZ at a 1.5 &Aring; probe measured 2,715,648 bounding voxels
+at 0.40 &Aring; and 8,915,712 at 0.25 &Aring;. Re-run the comparison directly:
+
+```bash
+./build_github_pages.sh
+./tools/benchmark_grid_sizes.mjs /path/to/2LYZ.pdb
+```
+
+For the much larger 1JJ2 ribosomal subunit, the same benchmark measured 1,951,488 voxels at
+2.00 &Aring;, 12,300,800 at 1.00 &Aring;, and 27,713,664 at 0.75 &Aring;. A 0.50 &Aring; request
+was rejected before grid allocation because its 90.9 million voxels exceed the browser ceiling.
+Reproduce those measurements with:
+
+```bash
+./tools/benchmark_grid_sizes.mjs /path/to/1JJ2.pdb 2 1 0.75 0.5
+```
 
 ## Activate Pages deployment
 
@@ -120,7 +147,7 @@ Pass another compatible PDB path explicitly to run the 2LYZ assertions from a di
 node tests/e2e/e2e_volume_parity.mjs /path/to/2LYZ.pdb
 ```
 
-Install the Playwright browsers once, then run all 21 browser tests against the shipped build:
+Install the Playwright browsers once, then run all 26 browser tests against the shipped build:
 
 ```bash
 bash devel/setup_playwright.sh
@@ -141,6 +168,8 @@ Refresh the documentation screenshots from the current production build:
 ## Documentation
 
 - [docs/E2E_TESTS.md](docs/E2E_TESTS.md) - Whole-system and browser test organization.
+- [docs/GEOMETRY_MODEL.md](docs/GEOMETRY_MODEL.md) - Voxel coordinates, cavity treatment, and
+  native-oracle contract.
 - [docs/PLAYWRIGHT_USAGE.md](docs/PLAYWRIGHT_USAGE.md) - Browser-test installation and commands.
 - [docs/CHANGELOG.md](docs/CHANGELOG.md) - Implementation decisions and verification history.
 

@@ -21,20 +21,55 @@ const translatedReferencePdb = [
   "END",
 ].join("\n");
 
+function makeCavityCagePdb() {
+  const lines = [];
+  let serial = 1;
+  for (const z of [-4, 0, 4]) {
+    for (const y of [-4, 0, 4]) {
+      for (const x of [-4, 0, 4]) {
+        if (x === 0 && y === 0 && z === 0) {
+          continue;
+        }
+        const atomSerial = String(serial).padStart(5);
+        const residue = String(serial).padStart(4);
+        const coordinates = [x, y, z].map((value) => value.toFixed(3).padStart(8)).join("");
+        lines.push(
+          `ATOM  ${atomSerial}  CA  ALA A${residue}    ${coordinates}  1.00 20.00           C`,
+        );
+        serial += 1;
+      }
+    }
+  }
+  return [...lines, "END"].join("\n");
+}
+
 function resultBytes(exports, pointerName, lengthName) {
   const pointer = exports[pointerName]();
   const length = exports[lengthName]();
   return new Uint8Array(exports.memory.buffer, pointer, length);
 }
 
-async function calculateVolume(pdbBytes, probe = 1.5, gridSize = 0.5) {
+async function calculateVolume(
+  pdbBytes,
+  probe = 1.5,
+  gridSize = 0.5,
+  fillInternalCavities = false,
+) {
   const wasmBytes = await readFile(wasmPath);
   const module = await WebAssembly.instantiate(wasmBytes, {});
   const exports = module.instance.exports;
   const pointer = exports.wasm_input_alloc(pdbBytes.length);
   new Uint8Array(exports.memory.buffer, pointer, pdbBytes.length).set(pdbBytes);
 
-  const status = exports.wasm_calculate(pointer, pdbBytes.length, probe, gridSize, 0, 1);
+  const status = exports.wasm_calculate(
+    pointer,
+    pdbBytes.length,
+    probe,
+    gridSize,
+    0,
+    1,
+    Number(fillInternalCavities),
+  );
   const jsonBytes = resultBytes(exports, "wasm_result_pointer", "wasm_result_length");
   const result = JSON.parse(new TextDecoder().decode(jsonBytes));
   const mrc = resultBytes(exports, "wasm_mrc_pointer", "wasm_mrc_length");
@@ -98,9 +133,24 @@ async function main() {
   assert.match(overLimit.result.error, /browser limit is 64 million/);
   assert.equal(overLimit.mrc.byteLength, 0);
 
+  // Values independently verified with the v26.07 C++ Volume and VolumeNoCav executables.
+  const cavityCageBytes = new TextEncoder().encode(makeCavityCagePdb());
+  const ordinaryCage = await calculateVolume(cavityCageBytes);
+  assert.equal(ordinaryCage.status, 0);
+  assert.equal(ordinaryCage.result.atomCount, 26);
+  assert.equal(ordinaryCage.result.volume, 1411.25);
+  assert.ok(Math.abs(ordinaryCage.result.surfaceArea - 871.553) < 0.001);
+
+  const filledCage = await calculateVolume(cavityCageBytes, 1.5, 0.5, true);
+  assert.equal(filledCage.status, 0);
+  assert.equal(filledCage.result.cavityVoxelsFilled, 27);
+  assert.equal(filledCage.result.volume, 1450.125);
+  assert.ok(Math.abs(filledCage.result.surfaceArea - 812.408) < 0.001);
+
   console.log("PASS: WASM matches the native reference for a translated, non-unit grid.");
   console.log("PASS: MRC2014 dimensions, axes, sampling, and ORIGIN placement are correct.");
   console.log("PASS: WASM rejects bounding grids above 64 million voxels.");
+  console.log("PASS: Volume and VolumeNoCav match the cavity-sensitive C++ cage oracle.");
 
   if (!(await pathExists(pdbPath))) {
     console.log("SKIP: optional 2LYZ reference fixture is not available.");
@@ -118,6 +168,15 @@ async function main() {
   assert.deepEqual(calculation.result.dimensions, { x: 112, y: 104, z: 124 });
   assert.deepEqual(readMrcHeader(calculation.mrc).dimensions, [112, 104, 124]);
   console.log("PASS: WASM matches the v26.07 2LYZ reference calculation.");
+
+  const cavityFilled = await calculateVolume(pdbBytes, 1.5, 0.5, true);
+  assert.equal(cavityFilled.status, 0);
+  assert.equal(cavityFilled.result.ok, true);
+  assert.equal(cavityFilled.result.fillInternalCavities, true);
+  assert.equal(cavityFilled.result.cavityVoxelsFilled, 4);
+  assert.equal(cavityFilled.result.volume, 17_863);
+  assert.ok(Math.abs(cavityFilled.result.surfaceArea - 5_430.653) < 0.001);
+  console.log("PASS: WASM VolumeNoCav mode matches the cavity-sensitive C++ 2LYZ oracle.");
 }
 
 await main();

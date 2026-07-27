@@ -4,7 +4,14 @@
 
 ### Additions and New Features
 
-- Expanded Playwright coverage from one smoke test to 21 browser tests across every input mode,
+- Added `docs/HUMAN_GUIDANCE.md` to preserve the project's scientific audience, independent WASM
+  ownership, selective feature-parity goals, low-level voxel-processing boundary, supported
+  inputs and formats, and review priorities.
+- Added an opt-in "Fill internal cavities" Volume control matching the released
+  `VolumeNoCav.exe` calculation order.
+- Added `docs/GEOMETRY_MODEL.md` to define coordinates, voxel connectivity, cavity treatment,
+  numerical behavior, and the native oracle.
+- Expanded Playwright coverage from one smoke test to 26 browser tests across every input mode,
   atom filters, validation and HTTP errors, the voxel limit, cancellation, presets, result
   controls, ported help, color-mode persistence, original artwork, MRC/NGL placement, downloads,
   and the NGL viewer.
@@ -13,6 +20,13 @@
 - Added `tools/capture_readme_screenshots.sh` to rebuild, serve, and refresh all three
   documentation screenshots through Playwright, plus a temporary light-mode NGL result for
   visual QA.
+- Added `tools/benchmark_grid_sizes.mjs` to measure candidate voxel spacings with the production
+  WASM engine and a real PDB structure.
+- Added a shared project footer linking the tool selector, source repository, and 3V publication.
+- Added route-aware breadcrumbs for setup, running, result, and error states.
+- Added browser-native gzip compression for MRC downloads with an uncompressed fallback.
+- Added adaptive, coordinate-preserving MRC binning for the NGL preview so maps above 8 million
+  voxels do not expand directly into full-resolution `Float32Array` density data.
 - Ported the applicable 3vee-server Volume tooltips and restored the 50S ribosomal-subunit preset.
 - Restored the site landing page as the original 3vee external-volume and internal-volume tool
   selector, with Volume Calculation available and later ports identified explicitly.
@@ -21,6 +35,23 @@
 
 ### Behavior or Interface Changes
 
+- Added "Very high - 0.40 A" and "Ultra - 0.25 A" grid choices while retaining 0.50 angstrom as
+  the default, with approximate relative voxel costs shown beside the selector.
+- Removed hard minimum and maximum grid-spacing checks from WASM; any finite positive spacing is
+  valid, while the computed 64-million bounding-grid ceiling remains the allocation guard.
+- Replaced panel-specific "All tools" links with one state-derived breadcrumb component so future
+  tools can inherit navigation without duplicating markup.
+- Report cavity treatment in the result summary and JSON report, and distinguish cavity-filled
+  MRC and JSON filenames with `volume-no-cav`.
+- Restored the original server's compressed MRC delivery as `.mrc.gz` without changing the
+  full-resolution occupancy artifact.
+- Kept calculations, measurements, and downloads at the selected grid while treating the NGL
+  surface as a clearly labeled display artifact: full resolution through 8 million voxels and
+  exact bin 2 through the current 64-million ceiling.
+- Normalized binned preview density to fractional occupancy so every NGL surface retains the 0.5
+  isolevel, and placed binned samples at their source-block centers.
+- Removed unreachable bin-3 scaffolding and require complete bin blocks, preserving the original
+  MRC extent instead of creating ambiguous partial edge cells.
 - Made RCSB downloads abortable so cancelling during a pending fetch cannot resume an old
   calculation.
 - Refreshed the README around the complete browser workflow, explicit shell commands, current
@@ -43,6 +74,12 @@
 
 ### Fixes and Maintenance
 
+- Moved adaptive preview block summation, normalization, density statistics, and mode-2 MRC
+  serialization from TypeScript into the Rust WebAssembly worker. TypeScript now only transfers
+  the full-resolution and preview artifacts, so no application-owned JavaScript loop traverses
+  every voxel.
+- Clarified that the WASM implementation owns its browser-specific behavior independently from the
+  C++ and Rust codebases.
 - Updated the GitHub Pages workflow seed to use current action majors and `npm ci`.
 - Scoped Pages write and OpenID Connect permissions to the deployment job.
 - Added source checks and the full Chromium suite as required pre-deployment gates.
@@ -63,6 +100,8 @@
 
 ### Decisions and Failures
 
+- Exposed both 0.40- and 0.25-angstrom choices after measuring real 2LYZ workloads; the finer
+  option remains safe because total bounding voxels, not spacing, control pre-allocation rejection.
 - Kept screenshot capture as an explicit script under `tools/` instead of hiding it behind a
   `package.json` command alias.
 - Kept both dark- and light-mode NGL visual checks inside the repository screenshot harness
@@ -80,7 +119,21 @@
 
 ### Developer Tests and Notes
 
-- Confirmed all 21 Playwright tests pass against the production `dist/` build.
+- Added Rust characterization tests for opt-in cavity filling and for preview resolution
+  selection, normalized bin-2 density, coordinate/extent preservation, and incomplete-block
+  rejection.
+- Added a cavity-sensitive 2LYZ parity case matching the C++ `VolumeNoCav.exe` oracle: four
+  accessible-grid voxels filled, 17,863.000 cubic angstroms, and 5,430.653 square angstroms.
+- Added a compact cavity-sensitive cage oracle that runs in clean checkouts and matches the C++
+  Volume result (1,411.250 cubic angstroms) and VolumeNoCav result (27 accessible voxels filled,
+  1,450.125 cubic angstroms).
+- Measured production WASM 2LYZ grids at 2,715,648 voxels for 0.40 angstrom and 8,915,712 voxels
+  for 0.25 angstrom, versus 1,444,352 at the 0.50-angstrom default.
+- Measured 1JJ2 at 1,951,488 voxels for 2.00 angstrom, 12,300,800 for 1.00 angstrom, and
+  27,713,664 for 0.75 angstrom; confirmed its 90.9-million-voxel 0.50-angstrom grid is rejected
+  before allocation.
+- Confirmed all 26 Playwright tests pass against the production `dist/` build, including
+  independent gzip validation and the adaptive binned-NGL path above 8 million voxels.
 - Confirmed all three documentation images are 1600 x 1000 and remain below 1 MB.
 - Measured every ribbon color at greater than 9:1 against the `#07131f` viewer background.
 - Measured the light-mode text and control pairs at or above 4.5:1 and visually checked the

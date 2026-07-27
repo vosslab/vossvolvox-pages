@@ -14,6 +14,6 @@ test("smoke: tool selector opens Volume and an uploaded PDB produces results", a
   await expect(page.locator(".primary-stats")).toContainText(/\u00c5\u00b3[\s\S]*\u00c5\u00b2/);
   await expect(page.getByRole("link", { name: /MRC density map/ })).toHaveAttribute(
     "download",
-    "local-example-volume.mrc",
+    "local-example-volume.mrc.gz",
   );
 });

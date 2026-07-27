@@ -19,6 +19,7 @@
     >
       Light mode
     </button>
+    <nav id="breadcrumbs" class="breadcrumbs page-shell" aria-label="Breadcrumb" hidden></nav>
     <main>
       <section id="tool-selector-panel" class="page-shell tool-selector">
         <div class="selector-intro">
@@ -83,7 +84,6 @@
 
       <section id="setup-panel" class="page-shell" hidden>
         <div class="tool-intro">
-          <a class="tool-back" href="#">&larr; All tools</a>
           <h1>Volume Calculation</h1>
           <p>
             Voxel-based solvent-excluded volume and surface-area calculation for PDB coordinates.
@@ -227,8 +227,8 @@
                     <span
                       class="help-tip"
                       tabindex="0"
-                      aria-label="Volumes are calculated on a three-dimensional grid. Crude is 2.0 angstroms, Low is 1.0 angstrom, Medium is 0.75 angstrom, and High is 0.5 angstrom voxel spacing."
-                      data-tooltip="Volumes are calculated on a three-dimensional grid. Crude is 2.0 angstroms, Low is 1.0 angstrom, Medium is 0.75 angstrom, and High is 0.5 angstrom voxel spacing."
+                      aria-label="Volumes are calculated on a three-dimensional grid. Crude is 2.0 angstroms, Low is 1.0 angstrom, Medium is 0.75 angstrom, High is 0.5 angstrom, Very high is 0.4 angstrom, and Ultra is 0.25 angstrom voxel spacing."
+                      data-tooltip="Volumes are calculated on a three-dimensional grid. Crude is 2.0 angstroms, Low is 1.0 angstrom, Medium is 0.75 angstrom, High is 0.5 angstrom, Very high is 0.4 angstrom, and Ultra is 0.25 angstrom voxel spacing."
                       >?</span
                     >
                   </span>
@@ -237,8 +237,13 @@
                     <option value="1">Low - 1.00 &Aring;</option>
                     <option value="0.75">Medium - 0.75 &Aring;</option>
                     <option value="0.5" selected>High - 0.50 &Aring;</option>
+                    <option value="0.4">Very high - 0.40 &Aring;</option>
+                    <option value="0.25">Ultra - 0.25 &Aring;</option>
                   </select>
-                  <small>Lower spacing increases resolution, runtime, and memory use.</small>
+                  <small>
+                    Relative to 0.50 &Aring;, 0.40 &Aring; uses about 2&times; and 0.25 &Aring;
+                    about 6-8&times; as many voxels.
+                  </small>
                 </label>
               </div>
 
@@ -269,6 +274,26 @@
                   <span>
                     <strong>Exclude water molecules</strong>
                     <small>Applies when HETATM records are included.</small>
+                  </span>
+                </label>
+                <label class="check-row compact wide">
+                  <input
+                    id="fill-internal-cavities"
+                    type="checkbox"
+                    aria-label="Fill internal cavities"
+                  />
+                  <span>
+                    <strong>
+                      Fill internal cavities
+                      <span
+                        class="help-tip"
+                        tabindex="0"
+                        aria-label="Match the VolumeNoCav method by filling enclosed empty components on the probe-accessible grid before solvent-excluded surface contraction."
+                        data-tooltip="Match VolumeNoCav: fill enclosed empty components on the probe-accessible grid before solvent-excluded surface contraction."
+                        >?</span
+                      >
+                    </strong>
+                    <small>Include enclosed internal voids in the reported volume.</small>
                   </span>
                 </label>
               </div>
@@ -332,7 +357,6 @@
       <section id="results-panel" class="page-shell" hidden>
         <div class="results-heading">
           <div>
-            <a class="tool-back" href="#">&larr; All tools</a>
             <h1 id="result-input">Volume results</h1>
             <p>Completed in <span id="elapsed-output"></span> entirely in this browser.</p>
           </div>
@@ -365,7 +389,10 @@
               </div>
             </div>
             <div id="viewer" aria-label="Interactive molecule and volume surface"></div>
-            <p class="viewer-help">Drag to rotate. Scroll to zoom. Right-drag to pan.</p>
+            <p class="viewer-help">
+              Drag to rotate. Scroll to zoom. Right-drag to pan.
+              <span id="viewer-resolution"></span>
+            </p>
           </section>
 
           <aside class="stats-card">
@@ -462,6 +489,19 @@
                 <dt>Probe radius</dt>
                 <dd id="result-probe"></dd>
               </div>
+              <div>
+                <dt>
+                  Internal cavities
+                  <span
+                    class="help-tip"
+                    tabindex="0"
+                    aria-label="Reports whether enclosed internal voids were filled before solvent-excluded surface contraction."
+                    data-tooltip="Reports whether enclosed internal voids were filled before solvent-excluded surface contraction."
+                    >?</span
+                  >
+                </dt>
+                <dd id="result-cavities"></dd>
+              </div>
             </dl>
           </aside>
         </div>
@@ -472,8 +512,10 @@
           </div>
           <div class="download-grid">
             <a id="download-mrc" href="#">
-              <strong>MRC density map</strong>
-              <span>Binary occupancy map for ChimeraX, NGL, and other tools</span>
+              <strong id="download-mrc-label">MRC density map (.gz)</strong>
+              <span id="download-mrc-description"
+                >Gzip-compressed occupancy map; decompress if required by your viewer</span
+              >
             </a>
             <a id="download-json" href="#">
               <strong>JSON report</strong>
@@ -495,6 +537,19 @@
         <button id="retry-button" class="primary-button" type="button">Adjust inputs</button>
       </section>
     </main>
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <nav class="footer-links" aria-label="Project links">
+          <a href="#">All tools</a>
+          <a href="https://github.com/vosslab/vossvolvox-pages">Source code</a>
+          <a href="https://doi.org/10.1093/nar/gkq395">Publication</a>
+        </nav>
+        <p>
+          3V: cavity, channel and cleft volume calculator and extractor. Neil R. Voss and Mark
+          Gerstein, Nucleic Acids Research (2010).
+        </p>
+      </div>
+    </footer>
     <script type="module" src="main.js"></script>
   </body>
 </html>
