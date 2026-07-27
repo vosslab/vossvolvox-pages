@@ -56,6 +56,12 @@
   calculation.
 - Refreshed the README around the complete browser workflow, explicit shell commands, current
   screenshots, browser limits, and verified test coverage.
+- Reframed the README for structural biologists around the biological importance of internal
+  macromolecular volumes, rolling-probe theory, the two-surface 3V method, result interpretation,
+  and a browser-based 2LYZ example; moved deployment, memory-cap, benchmark, and developer-test
+  detail from the scientific landing page into `docs/DEVELOPMENT.md`.
+- Removed unavailable live-site links from the README and kept the current deployment status
+  explicit before the worked example.
 - Replaced the oversized promotional header and decorative compute graphics with a compact
   specialist-facing interface organized around PDB input, probe radius, voxel spacing, and
   coordinate filters.

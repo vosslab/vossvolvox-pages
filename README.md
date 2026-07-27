@@ -1,15 +1,73 @@
-# 3vee WASM tools
+# 3vee molecular volume tools
 
-Run 3vee molecular-volume tools from PDB coordinates in a browser. Protein structure specialists
-get a local Rust/WASM workflow without a calculation server.
+Explore protein and RNA structure as molecular volume. Structural biologists can measure
+solvent-excluded envelopes, surface area, and shape with a rolling probe directly in the browser.
 
-Deployment target: [vosslab.github.io/vossvolvox-pages](https://vosslab.github.io/vossvolvox-pages/)
+[Read the 3V publication](https://doi.org/10.1093/nar/gkq395)
 
-## Select a tool, then calculate
+Volume Calculation is complete in this repository but is not currently available at a public web
+address. Volume Range, Channel Finder, Single Channel Extraction, Solvent Extraction, and Exit
+Tunnel Extraction remain visible in the tool selector as planned ports.
 
-The landing page preserves the original 3vee external-volume and internal-volume tool selector.
-Volume Calculation is the first complete browser port; the remaining legacy tools are shown with
-their original artwork and port status rather than hidden.
+## Why internal volume matters
+
+Biomacromolecules are not solid objects. Deep clefts, pockets, cavities, channels, and chambers can
+form binding sites, transport paths, and functional compartments. These spaces become especially
+important in large protein and RNA assemblies, where visually tracing an internal region through
+atomic coordinates is difficult.
+
+3V converts atomic models into volumetric representations that can be measured, visualized, and
+downloaded for further analysis. The original method identifies internal space from the difference
+between two rolling-probe molecular envelopes: a large-probe shell and a solvent-sized excluded
+surface. The current browser tool provides the foundational single-envelope Volume Calculation.
+
+## From atoms to volume
+
+3V applies the rolling-probe method on a three-dimensional voxel grid. Each atom begins as a van der
+Waals sphere. A virtual spherical probe expands the accessible atomic volume, and contraction by the
+same probe radius produces the solvent-excluded molecular envelope.
+
+```text
+PDB coordinates -> rolling probe -> voxel envelope -> volume, surface area, and shape
+```
+
+The probe represents the physical scale used to interrogate the structure:
+
+- A 0 &Aring; probe approximates the van der Waals envelope.
+- A 1.5 &Aring; probe represents water and gives a standard solvent-excluded envelope.
+- A larger probe bridges narrow grooves and smooths the structure into a shell.
+- A smaller probe follows finer clefts and surface detail.
+
+Probe radius and grid spacing answer different questions. Probe radius defines which molecular
+features are accessible at a chosen physical scale. Grid spacing controls how finely that surface is
+sampled; a finer grid reduces voxel discretization without changing the probe itself.
+
+## Two surfaces reveal inside
+
+The complete 3V method compares two solvent-excluded surfaces:
+
+```text
+large-probe shell - solvent-probe molecular envelope = internal solvent volume
+                                                          |
+                              +---------------------------+----------------------+
+                              |                                                  |
+                         enclosed space                                exterior-connected
+                            cavities                              channels, clefts, and pockets
+```
+
+The large probe creates a connected outer shell across surface openings. Subtracting the
+solvent-probe envelope exposes space inside that shell that can accommodate the smaller probe.
+Enclosed components are cavities; components connected to the exterior form the generalized channel
+volume. This two-probe extraction model underlies the internal-volume tools awaiting browser ports.
+
+The current Volume Calculation uses one probe at a time. Its **Fill internal cavities** option asks
+whether enclosed voids should count as part of that one reported molecular envelope; it is distinct
+from extracting and characterizing cavities as separate objects.
+
+## See the molecular envelope
+
+The site begins with the original division between external- and internal-volume tools, then guides
+one structure from probe selection to an interactive molecule-and-surface result.
 
 <!-- screenshots:begin (managed by screenshot-docs) -->
 
@@ -18,160 +76,84 @@ their original artwork and port status rather than hidden.
 ![2LYZ molecular surface and calculated volume statistics in the browser](docs/screenshots/volume_results.png)
 <!-- screenshots:end -->
 
-## From structure to results
+## Lysozyme worked example
 
-The page provides the complete Volume workflow rather than a thin WebAssembly demonstration:
+The browser workflow provides a ready-made solvent-excluded-volume example:
 
-- Load an RCSB PDB entry or select a local PDB file.
-- Choose a probe radius, grid spacing, HETATM/water filters, and whether to fill internal cavities.
-- Select curated voxel spacing from 2.00 through 0.25 &Aring;; 0.50 &Aring; remains the default.
-- Use the original lysozyme and 50S ribosomal-subunit presets and ported 3vee help.
-- Calculate in a cancellable Web Worker so the interface stays responsive.
-- Inspect volume, surface area, sphericity, radius, center, atoms, and voxel counts.
-- Rotate the molecule and calculated volume surface in the NGL viewer.
-- Switch between persistent dark and light interface and NGL palettes.
-- Use shared breadcrumbs and project footer links to return to tools, source, or the publication.
-- Download the exact input, a gzip-compressed MRC occupancy map, and a JSON report.
-- Download results before reloading or closing the page; this static site stores no job history.
+1. Select **Volume Calculation**.
+2. Select **Lysozyme - Solvent Excluded** to load the 2LYZ preset.
+3. Keep the 1.5 &Aring; probe and 0.5 &Aring; grid, then select **Calculate volume**.
+4. Rotate the structure and compare the molecular ribbon with the translucent volume surface.
 
-```text
-PDB form -> Web Worker -> Rust/WASM voxel engine -> statistics + NGL + downloads
-```
+For the 2LYZ reference used in scientific parity testing, this calculation produces a volume of
+17,833.500 &Aring;&sup3; and a surface area of 5,493.514 &Aring;&sup2;. The result demonstrates how
+the solvent-sized probe converts atomic coordinates into a measurable molecular envelope.
 
-The selected local structure remains in the browser. RCSB mode fetches the selected structure
-directly from the RCSB Protein Data Bank; no coordinate text is inserted into the page as HTML.
+Next, choose **Lysozyme - Shell**. Its 6 &Aring; probe bridges smaller surface depressions and produces
+the smoother outer envelope used conceptually in the two-probe internal-volume method.
 
-## Scope and browser limits
+## Interpret the measurements
 
-This repository currently implements the full Volume Calculation tool and keeps the legacy tool
-selector as the site-level structure. GitHub Pages has no server-side compute, filesystem, native
-threads, or process execution, so this build uses one Web Worker and a single-threaded WebAssembly
-core.
+| Result | Structural meaning |
+| --- | --- |
+| Volume | Space enclosed by occupied voxels in the probe-derived envelope |
+| Surface area | Area estimated from exposed voxel-face and edge configurations |
+| Sphericity | Resemblance to a sphere, where 1.0 is a perfect sphere |
+| Effective radius | Radius of a sphere with the same surface-area-to-volume ratio |
+| Center | Average Cartesian position of occupied voxels |
+| MRC map | Full-resolution occupancy volume for visualization or further analysis |
 
-Calculations stop before allocating a bounding grid above 64 million voxels. Large structures can
-use a coarser grid or smaller probe. The RCSB biological-assembly option also requires browser
-support for streaming gzip decompression; local upload mode does not. Local PDB files are limited
-to 30 MB.
+The interactive NGL view overlays the calculated volume with the molecular structure. Surface
+visibility, opacity, and molecular color can be adjusted without changing the numerical result.
+Downloads include the occupancy map as gzip-compressed MRC, the exact input PDB coordinates, and a
+JSON report containing parameters and measurements.
 
-## Quick start
+## Choose inputs deliberately
 
-Prerequisites are Node.js with npm, stable Rust, the `wasm32-unknown-unknown` Rust target, and
-Python 3.12 for the local static server.
+- **Coordinate set:** Select the biological assembly when the functional oligomer, rather than the
+  crystallographic asymmetric unit, is the biological object of interest.
+- **Atoms:** Decide whether ligands, ions, modified residues, and waters belong in the volume being
+  measured. The HETATM and water controls make that choice explicit.
+- **Probe radius:** Match the probe to the molecule or passage whose accessibility matters. Results
+  at different probe sizes describe different surfaces.
+- **Grid spacing:** Start coarse while exploring a large assembly, then refine the calculation when
+  the surface and measurement need greater spatial resolution.
+- **Cavity treatment:** Fill enclosed voids only when the scientific question calls for a solid
+  outer molecular envelope.
 
-```bash
-npm ci
-rustup target add wasm32-unknown-unknown
-./build_github_pages.sh
-source source_me.sh && ./run_web_server.sh
-```
+The calculation describes one static coordinate model. Alternate conformations, molecular dynamics,
+and experimental uncertainty require separate structures or analyses.
 
-Open the displayed local URL, keep the 2LYZ defaults, and select **Calculate volume**. The default
-0.5 &Aring; grid and 1.5 &Aring; probe produce a 112 x 104 x 124 bounding grid with 142,668
-filled voxels.
+## Scientific browser workflow
 
-All JavaScript development and runtime packages are declared in `package.json`; `package-lock.json`
-records the resolved installation.
+- Retrieve an RCSB PDB entry or select a local PDB coordinate file.
+- Choose the asymmetric unit or biological assembly and the atom records to include.
+- Calculate locally in a browser worker; an uploaded structure is not sent to a calculation server.
+- Inspect volume, surface area, sphericity, effective radius, center, and calculation parameters.
+- Compare the molecular model with its calculated surface in the NGL viewer.
+- Export the full-resolution occupancy map and a reproducible parameter report.
 
-## Memory boundary
+The browser edition is an independent WebAssembly implementation of 3V. It preserves the original
+scientific method and tool organization while replacing server-side jobs with an immediate,
+interactive workflow.
 
-The calculation stops before allocating a bounding grid above 64 million voxels. This is the total
-`x * y * z` grid size, not the number of filled molecular voxels.
+Download results before leaving the page. The browser edition stores no job history.
 
-- Each computational grid is bit-packed: 64 million positions use about 8 MB.
-- Probe contraction has a bounded three-grid peak of about 24 MB.
-- Filling internal cavities also uses at most three simultaneous bit-packed grids, but its
-  double-probe padding can produce a larger bounding grid than ordinary Volume.
-- The mode-0 MRC map stores one byte per grid position before gzip compression and can approach
-  64 MB in browser memory. The downloaded `.mrc.gz` is usually much smaller, but compression does
-  not reduce NGL's working memory.
-- NGL previews maps through 8 million voxels at full resolution, then uses normalized block binning:
-  bin 2 reduces its dense map by 8-fold through the current 64-million limit. Numerical results
-  and the downloaded map always retain the selected grid.
-- The browser also holds WebAssembly memory, the input PDB, results, and NGL viewer data.
+## Documentation and citation
 
-For scale, the default 2LYZ calculation uses 1,444,352 bounding-grid positions, about 2.26% of the
-limit. The 64-million value is an allocation ceiling, not a promise that every accepted job will
-fit every browser and GPU. Large structures can use a coarser grid or smaller probe to reduce the
-bounding dimensions.
+- [docs/GEOMETRY_MODEL.md](docs/GEOMETRY_MODEL.md) - Numerical definition of the voxel envelope,
+  cavity treatment, coordinates, and output map.
+- [docs/AUTHORS.md](docs/AUTHORS.md) - Scientific background and project authorship.
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) - Current capabilities, validation, and implementation
+  history.
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Local builds, verification, benchmarks, resource
+  limits, and deployment for maintainers.
 
-The production WASM benchmark for 2LYZ at a 1.5 &Aring; probe measured 2,715,648 bounding voxels
-at 0.40 &Aring; and 8,915,712 at 0.25 &Aring;. Re-run the comparison directly:
+If 3V contributes to a scientific analysis, cite:
 
-```bash
-./build_github_pages.sh
-./tools/benchmark_grid_sizes.mjs /path/to/2LYZ.pdb
-```
-
-For the much larger 1JJ2 ribosomal subunit, the same benchmark measured 1,951,488 voxels at
-2.00 &Aring;, 12,300,800 at 1.00 &Aring;, and 27,713,664 at 0.75 &Aring;. A 0.50 &Aring; request
-was rejected before grid allocation because its 90.9 million voxels exceed the browser ceiling.
-Reproduce those measurements with:
-
-```bash
-./tools/benchmark_grid_sizes.mjs /path/to/1JJ2.pdb 2 1 0.75 0.5
-```
-
-## Activate Pages deployment
-
-The repository-root `deploy-pages.yml` is the reviewed workflow seed. GitHub discovers workflows
-only after a human places them under `.github/workflows/`:
-
-```bash
-mkdir -p .github/workflows
-git mv deploy-pages.yml .github/workflows/deploy-pages.yml
-```
-
-Then set **Settings -> Pages -> Build and deployment -> Source** to **GitHub Actions**.
-
-## Verification
-
-Run the normal source checks and production build:
-
-```bash
-./check_codebase.sh
-./build_github_pages.sh
-```
-
-The scientific parity check always runs a built-in translated, non-unit-grid reference and validates
-the MRC2014 placement fields. When the nested 2LYZ fixture exists under
-`OTHER_REPOS/vossvolvox-rust/OTHER_REPOS/vossvolvox-cpp/xyzr/`, it also runs the full v26.07
-protein reference:
-
-```bash
-node tests/e2e/e2e_volume_parity.mjs
-```
-
-Pass another compatible PDB path explicitly to run the 2LYZ assertions from a different checkout:
-
-```bash
-node tests/e2e/e2e_volume_parity.mjs /path/to/2LYZ.pdb
-```
-
-Install the Playwright browsers once, then run all 26 browser tests against the shipped build:
-
-```bash
-bash devel/setup_playwright.sh
-./run_playwright_tests.sh --build
-```
-
-They cover the tool-selector-to-Volume route, RCSB asymmetric and biological-assembly inputs, local
-upload, atom filters, validation and HTTP errors, the 64-million-voxel guard, cancellation,
-presets, ported tooltips, persistent color modes, MRC/NGL placement, result controls, downloads,
-original selector artwork, and the NGL viewer.
-
-Refresh the documentation screenshots from the current production build:
-
-```bash
-./tools/capture_readme_screenshots.sh
-```
-
-## Documentation
-
-- [docs/E2E_TESTS.md](docs/E2E_TESTS.md) - Whole-system and browser test organization.
-- [docs/GEOMETRY_MODEL.md](docs/GEOMETRY_MODEL.md) - Voxel coordinates, cavity treatment, and
-  native-oracle contract.
-- [docs/PLAYWRIGHT_USAGE.md](docs/PLAYWRIGHT_USAGE.md) - Browser-test installation and commands.
-- [docs/CHANGELOG.md](docs/CHANGELOG.md) - Implementation decisions and verification history.
+> Voss NR, Gerstein M. 3V: cavity, channel and cleft volume calculator and extractor.
+> *Nucleic Acids Research*. 2010;38:W555-W562.
+> [doi:10.1093/nar/gkq395](https://doi.org/10.1093/nar/gkq395).
 
 ## License
 
