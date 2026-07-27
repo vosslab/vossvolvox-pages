@@ -10,6 +10,9 @@ Durable project decisions for the browser implementation of 3vee tools.
   validation determine which features are ported and when.
 - Design for protein structure specialists. Prefer compact scientific controls and terminology
   over general-audience explanation or promotional interface elements.
+- Design and validate primarily for desktop and laptop browsers. Keep responsive fallback behavior
+  functional where practical, and do not block or label phone use as unsupported, but do not make
+  phone-specific UX a product or acceptance target.
 - Preserve the existing 3vee tools, content, artwork, help, and publication context when porting
   them into the all-in-one site. Keep polish when it improves the scientific workflow; omit
   decoration and interface structure that do not.

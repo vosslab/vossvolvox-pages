@@ -29,12 +29,28 @@ try {
     path: path.join(outputDirectory, "tool_selector.png"),
     animations: "disabled",
   });
+  await page.getByRole("button", { name: "Light mode" }).click();
+  await page.locator('html[data-theme="light"]').waitFor();
+  await page.screenshot({
+    path: path.join(outputDirectory, "tool_selector_light.png"),
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Dark mode" }).click();
+  await page.locator('html[data-theme="dark"]').waitFor();
   await page.getByRole("link", { name: "Volume Calculation" }).click();
   await page.getByRole("heading", { name: "Volume Calculation", exact: true }).waitFor();
   await page.screenshot({
     path: path.join(outputDirectory, "volume_setup.png"),
     animations: "disabled",
   });
+  await page.getByRole("button", { name: "Light mode" }).click();
+  await page.locator('html[data-theme="light"]').waitFor();
+  await page.screenshot({
+    path: path.join(outputDirectory, "volume_setup_light.png"),
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Dark mode" }).click();
+  await page.locator('html[data-theme="dark"]').waitFor();
 
   if (referencePdbPath === undefined) {
     await page.getByText("Upload file", { exact: true }).click();

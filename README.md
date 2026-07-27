@@ -75,9 +75,11 @@ one structure from probe selection to an interactive molecule-and-surface result
 
 <!-- screenshots:begin (managed by screenshot-docs) -->
 
-![3vee tool selector showing external-volume and internal-volume procedures](docs/screenshots/tool_selector.png)
-![Volume setup form with RCSB and local PDB file input choices](docs/screenshots/volume_setup.png)
-![2LYZ molecular surface and calculated volume statistics in the browser](docs/screenshots/volume_results.png)
+| View | Dark mode | Light mode |
+| --- | --- | --- |
+| Tool selector | ![Dark-mode 3vee tool selector](docs/screenshots/tool_selector.png) | ![Light-mode 3vee tool selector](docs/screenshots/tool_selector_light.png) |
+| Volume setup | ![Dark-mode Volume setup form](docs/screenshots/volume_setup.png) | ![Light-mode Volume setup form](docs/screenshots/volume_setup_light.png) |
+| 2LYZ result | ![Dark-mode 2LYZ molecular surface and volume results](docs/screenshots/volume_results.png) | ![Light-mode 2LYZ molecular surface and volume results](docs/screenshots/volume_results_light.png) |
 <!-- screenshots:end -->
 
 ## Lysozyme worked example

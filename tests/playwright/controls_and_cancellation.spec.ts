@@ -71,9 +71,18 @@ test("sphericity help uses squared-volume notation", async ({ page }) => {
   await expect(page.getByLabel(/V\u00b2/)).toHaveAttribute("data-tooltip", /V\u00b2/);
 });
 
-test("color mode changes and persists across navigation", async ({ page }) => {
+test("color mode persists through tool navigation and reload", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Light mode" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await openVolumeTool(page);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page
+    .getByRole("navigation", { name: "Breadcrumb" })
+    .getByRole("link", { name: "All tools" })
+    .click();
+  await expect(page.getByRole("heading", { name: "External volumes" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 
   await page.reload();

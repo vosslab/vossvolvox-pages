@@ -38,8 +38,10 @@ else
 fi
 mkdir -p docs/screenshots
 cp "$SCREENSHOT_TEMP_DIR/tool_selector.png" docs/screenshots/tool_selector.png
+cp "$SCREENSHOT_TEMP_DIR/tool_selector_light.png" docs/screenshots/tool_selector_light.png
 cp "$SCREENSHOT_TEMP_DIR/volume_setup.png" docs/screenshots/volume_setup.png
+cp "$SCREENSHOT_TEMP_DIR/volume_setup_light.png" docs/screenshots/volume_setup_light.png
 cp "$SCREENSHOT_TEMP_DIR/volume_results.png" docs/screenshots/volume_results.png
+cp "$SCREENSHOT_TEMP_DIR/volume_results_light.png" docs/screenshots/volume_results_light.png
 
-echo "Updated docs/screenshots/tool_selector.png, volume_setup.png, and volume_results.png."
-echo "Captured light-mode visual QA at $SCREENSHOT_TEMP_DIR/volume_results_light.png."
+echo "Updated dark- and light-mode selector, setup, and result screenshots."

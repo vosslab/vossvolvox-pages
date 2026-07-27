@@ -40,6 +40,11 @@
 
 ### Behavior or Interface Changes
 
+- Reworked the repeat-use tool selector into a stable one-to-two category grid with equal-width,
+  image-first cards, measured per-tool color identities in dark and light modes, and more useful
+  vertical spacing; removed the redundant "Available" label from all six working tools.
+- Replaced three full-width README screenshots with compact dark- and light-mode pairs for the
+  selector, Volume setup, and 2LYZ result so both themes are visible without doubling page length.
 - Marked all six selector tools available and added tool-specific probe ranges, coordinates,
   channel-size filters, presets, status text, measurement tables, and download descriptions.
 - Kept the browser calculation variables and operation order close to `vossvolvox-rust`; isolated
@@ -132,6 +137,9 @@
 
 ### Decisions and Failures
 
+- Set desktop and laptop browsers as the interface design and acceptance target while retaining
+  responsive fallback behavior and allowing phone access; phone-specific UX and screenshot
+  acceptance remain outside the product target.
 - Exposed both 0.40- and 0.25-angstrom choices after measuring real 2LYZ workloads; the finer
   option remains safe because total bounding voxels, not spacing, control pre-allocation rejection.
 - Kept screenshot capture as an explicit script under `tools/` instead of hiding it behind a
@@ -151,6 +159,17 @@
 
 ### Developer Tests and Notes
 
+- Measured all six selector title accents against their real card surfaces: dark-mode ratios range
+  from 10.41:1 to 13.44:1 and light-mode ratios range from 6.27:1 to 7.60:1, exceeding the
+  repository's 5.5:1 house target.
+- Confirmed the complete TypeScript check gate and all 34 Playwright tests pass, including opening
+  every tool and returning through "All tools", then refreshed and visually inspected the managed
+  1600 by 1000 screenshots through `./tools/capture_readme_screenshots.sh`.
+- Expanded light-mode verification so the browser suite preserves the theme through tool entry,
+  "All tools" return navigation, and reload, while the repository screenshot harness now captures
+  and commits the selector, setup form, and calculated result in both modes.
+- Confirmed all 30 focused Markdown-link and README checks pass with the three new light-mode PNGs
+  included as tracked documentation assets.
 - Audited the test suite against `docs/PYTEST_STYLE.md`: all 490 fast pytest checks pass, each
   remains well under one second, the browser tests remain in the designated Playwright lane, and
   no tests need deletion or relocation.
