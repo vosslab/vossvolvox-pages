@@ -6,13 +6,14 @@ import {
   SMALL_PDB,
   TRANSLATED_PDB,
   calculateUploadedPdb,
+  loadUploadedPdb,
   openVolumeTool,
 } from "./helper_volume";
 
 // Selector contract:
-// - Theme and calculation controls: src/index.html (#theme-toggle, #volume-form)
-// - Running cancellation panel: src/index.html (#running-panel)
-// - Result viewer controls: src/index.html (#results-panel)
+// - Theme and calculation controls: src/index.html:15,96,571
+// - Running cancellation panel: src/index.html:579
+// - Results, viewer state, and New calculation: src/index.html:589,595,623,626
 
 async function readPresetState(page: Page): Promise<string[]> {
   return Promise.all([
@@ -119,13 +120,75 @@ test("NGL preserves the translated MRC origin", async ({ page }) => {
   await expect(page.locator("#viewer")).toHaveAttribute("data-volume-origin", "87,-42,12");
 });
 
-test("new calculation returns to an enabled setup form", async ({ page }) => {
+test("new calculation clears viewer data and returns to an enabled setup form", async ({
+  page,
+}) => {
   await page.goto("/");
   await calculateUploadedPdb(page);
+  await expect(page.locator("#viewer canvas")).toHaveCount(1);
+  await expect(page.locator("#viewer")).toHaveAttribute("data-volume-origin");
+  await expect(page.locator("#viewer")).toHaveAttribute("data-preview-bin");
+
   await page.getByRole("button", { name: "New calculation" }).click();
 
   await expect(page.getByRole("heading", { name: "Volume Calculation" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Calculate volume" })).toBeEnabled();
+  await expect(page.locator("#viewer")).toBeEmpty();
+  await expect(page.locator("#viewer")).not.toHaveAttribute("data-volume-origin");
+  await expect(page.locator("#viewer")).not.toHaveAttribute("data-preview-bin");
+  await expect(page.locator("#viewer-resolution")).toBeEmpty();
+});
+
+test("new calculation prevents a delayed result render from restoring viewer data", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    type GzipGateWindow = Window & {
+      gzipBlobEntered?: boolean;
+      gzipBlobSettled?: boolean;
+      releaseGzipBlob?: () => void;
+    };
+    const gateWindow = window as GzipGateWindow;
+    // The override must call the native method with each intercepted Response as its receiver.
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const originalBlob = Response.prototype.blob;
+    let releaseGzipBlob: (() => void) | undefined;
+    const gzipBlobMayFinish = new Promise<void>((resolve) => {
+      releaseGzipBlob = resolve;
+    });
+    gateWindow.releaseGzipBlob = releaseGzipBlob;
+    Response.prototype.blob = async function (): Promise<Blob> {
+      gateWindow.gzipBlobEntered = true;
+      await gzipBlobMayFinish;
+      const blob = await originalBlob.call(this);
+      gateWindow.gzipBlobSettled = true;
+      return blob;
+    };
+  });
+  await page.goto("/");
+  await loadUploadedPdb(page);
+  await page.getByLabel("Grid spacing", { exact: true }).selectOption("2");
+  await page.getByRole("button", { name: "Calculate volume" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as Window & { gzipBlobEntered?: boolean }).gzipBlobEntered),
+    )
+    .toBe(true);
+
+  await page.getByRole("button", { name: "New calculation" }).click();
+  await page.evaluate(() =>
+    (window as Window & { releaseGzipBlob?: () => void }).releaseGzipBlob?.(),
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as Window & { gzipBlobSettled?: boolean }).gzipBlobSettled),
+    )
+    .toBe(true);
+
+  await expect(page.getByRole("heading", { name: "Volume Calculation" })).toBeVisible();
+  await expect(page.locator("#viewer")).toBeEmpty();
+  await expect(page.locator("#viewer")).not.toHaveAttribute("data-preview-bin");
+  await expect(page.locator("#download-mrc")).not.toHaveAttribute("download");
 });
 
 test("result breadcrumbs return to the Volume setup", async ({ page }) => {

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Calculate protein volume and surface area entirely in your browser with vossvolvox WebAssembly."
+      content="Calculate macromolecular volume and extract solvent, channels, and the ribosomal exit tunnel in browser-based Rust WebAssembly."
     />
     <title>3vee molecular volume tools</title>
     <link rel="stylesheet" href="style.css" />
@@ -41,42 +41,42 @@
                 <span>Calculate structure volume for a selected solvent-probe radius.</span>
                 <small>Available</small>
               </a>
-              <article class="tool-option pending">
+              <a class="tool-option available" href="#volume-range">
                 <img src="img/volumeRange.png" alt="" width="251" height="157" />
                 <strong>Volume Range</strong>
                 <span>Calculate structure volume across a range of probe radii.</span>
-                <small>Port pending</small>
-              </article>
+                <small>Available</small>
+              </a>
             </div>
           </section>
 
           <section class="tool-group">
             <h2>Internal volumes</h2>
             <div class="tool-grid">
-              <article class="tool-option pending">
+              <a class="tool-option available" href="#channel-finder">
                 <img src="img/channelFinder.png" alt="" width="251" height="157" />
                 <strong>Channel Finder</strong>
                 <span>Find and extract major channels based on their size.</span>
-                <small>Port pending</small>
-              </article>
-              <article class="tool-option pending">
+                <small>Available</small>
+              </a>
+              <a class="tool-option available" href="#channel">
                 <img src="img/channelExtract.png" alt="" width="251" height="157" />
                 <strong>Single Channel Extraction</strong>
                 <span>Extract a channel near a known x, y, z coordinate.</span>
-                <small>Port pending</small>
-              </article>
-              <article class="tool-option pending">
+                <small>Available</small>
+              </a>
+              <a class="tool-option available" href="#solvent">
                 <img src="img/solventExtract.png" alt="" width="251" height="157" />
                 <strong>Solvent Extraction</strong>
                 <span>Extract all solvent-accessible internal volume from a structure.</span>
-                <small>Port pending</small>
-              </article>
-              <article class="tool-option pending">
+                <small>Available</small>
+              </a>
+              <a class="tool-option available" href="#tunnel">
                 <img src="img/tunnelExtract.png" alt="" width="251" height="157" />
                 <strong>Exit Tunnel Extraction</strong>
                 <span>Extract the polypeptide exit tunnel from a 50S ribosomal subunit.</span>
-                <small>Port pending</small>
-              </article>
+                <small>Available</small>
+              </a>
             </div>
           </section>
         </div>
@@ -84,8 +84,8 @@
 
       <section id="setup-panel" class="page-shell" hidden>
         <div class="tool-intro">
-          <h1>Volume Calculation</h1>
-          <p>
+          <h1 id="tool-title">Volume Calculation</h1>
+          <p id="tool-description">
             Voxel-based solvent-excluded volume and surface-area calculation for PDB coordinates.
           </p>
           <p class="privacy-note">
@@ -189,12 +189,14 @@
               <div class="card-heading">
                 <div>
                   <h2>Parameters</h2>
-                  <p>Probe radius, voxel spacing, and coordinate-record filters.</p>
+                  <p id="parameter-description">
+                    Probe radius, voxel spacing, and coordinate-record filters.
+                  </p>
                 </div>
               </div>
 
               <div class="parameter-grid">
-                <label for="probe-radius">
+                <label for="probe-radius" data-tool-controls="volume">
                   <span>
                     Probe radius
                     <span
@@ -219,6 +221,120 @@
                     <abbr title="angstrom">&Aring;</abbr>
                   </span>
                   <small>Radius of the spherical solvent probe.</small>
+                </label>
+
+                <label for="minimum-probe" data-tool-controls="volume-range" hidden>
+                  <span>Minimum probe radius</span>
+                  <span class="unit-input">
+                    <input
+                      id="minimum-probe"
+                      type="number"
+                      value="0"
+                      min="0"
+                      max="20"
+                      step="0.1"
+                    />
+                    <abbr title="angstrom">&Aring;</abbr>
+                  </span>
+                  <small>First rolling-probe radius in the series.</small>
+                </label>
+
+                <label for="maximum-probe" data-tool-controls="volume-range" hidden>
+                  <span>Maximum probe radius</span>
+                  <span class="unit-input">
+                    <input
+                      id="maximum-probe"
+                      type="number"
+                      value="6"
+                      min="0"
+                      max="20"
+                      step="0.1"
+                    />
+                    <abbr title="angstrom">&Aring;</abbr>
+                  </span>
+                  <small>Last rolling-probe radius in the series.</small>
+                </label>
+
+                <label for="probe-step" data-tool-controls="volume-range" hidden>
+                  <span>Probe step</span>
+                  <span class="unit-input">
+                    <input
+                      id="probe-step"
+                      type="number"
+                      value="1"
+                      min="0.01"
+                      max="20"
+                      step="0.01"
+                    />
+                    <abbr title="angstrom">&Aring;</abbr>
+                  </span>
+                  <small>Spacing between consecutive probe radii.</small>
+                </label>
+
+                <label for="big-probe" data-tool-controls="internal" hidden>
+                  <span>
+                    Outer probe radius
+                    <span
+                      class="help-tip"
+                      tabindex="0"
+                      aria-label="The outer probe bridges openings to construct the enclosing shell."
+                      data-tooltip="The outer probe bridges openings to construct the enclosing shell."
+                      >?</span
+                    >
+                  </span>
+                  <span class="unit-input">
+                    <input
+                      id="big-probe"
+                      type="number"
+                      value="9"
+                      min="0.1"
+                      max="40"
+                      step="0.1"
+                    />
+                    <abbr title="angstrom">&Aring;</abbr>
+                  </span>
+                  <small>Builds the outer molecular shell.</small>
+                </label>
+
+                <label for="small-probe" data-tool-controls="internal" hidden>
+                  <span>
+                    Inner probe radius
+                    <span
+                      class="help-tip"
+                      tabindex="0"
+                      aria-label="The inner probe defines solvent-accessible internal space."
+                      data-tooltip="The inner probe defines solvent-accessible internal space."
+                      >?</span
+                    >
+                  </span>
+                  <span class="unit-input">
+                    <input
+                      id="small-probe"
+                      type="number"
+                      value="1.5"
+                      min="0"
+                      max="40"
+                      step="0.1"
+                    />
+                    <abbr title="angstrom">&Aring;</abbr>
+                  </span>
+                  <small>Defines which internal passages remain accessible.</small>
+                </label>
+
+                <label for="trim-probe" data-tool-controls="internal" hidden>
+                  <span>Shell trim radius</span>
+                  <span class="unit-input">
+                    <input
+                      id="trim-probe"
+                      type="number"
+                      value="1.5"
+                      min="0"
+                      max="20"
+                      step="0.1"
+                    />
+                    <abbr title="angstrom">&Aring;</abbr>
+                  </span>
+                  <small>Contracts the outer shell before solvent extraction.</small>
                 </label>
 
                 <label for="grid-size">
@@ -276,7 +392,7 @@
                     <small>Applies when HETATM records are included.</small>
                   </span>
                 </label>
-                <label class="check-row compact wide">
+                <label class="check-row compact wide" data-tool-controls="volume">
                   <input
                     id="fill-internal-cavities"
                     type="checkbox"
@@ -298,7 +414,72 @@
                 </label>
               </div>
 
-              <div class="preset-row" aria-label="Preset examples">
+              <fieldset
+                class="tool-specific-fields"
+                data-tool-controls="channel"
+                aria-labelledby="coordinate-legend"
+                hidden
+              >
+                <legend id="coordinate-legend">Seed coordinate inside the channel</legend>
+                <div class="coordinate-grid">
+                  <label for="coordinate-x">
+                    X
+                    <input id="coordinate-x" type="number" value="56" step="0.1" />
+                  </label>
+                  <label for="coordinate-y">
+                    Y
+                    <input id="coordinate-y" type="number" value="140" step="0.1" />
+                  </label>
+                  <label for="coordinate-z">
+                    Z
+                    <input id="coordinate-z" type="number" value="74" step="0.1" />
+                  </label>
+                </div>
+              </fieldset>
+
+              <fieldset
+                class="tool-specific-fields"
+                data-tool-controls="channel-finder"
+                aria-labelledby="channel-filter-legend"
+                hidden
+              >
+                <legend id="channel-filter-legend">Channel size filter</legend>
+                <div class="channel-filter-grid">
+                  <label for="channel-filter-mode">
+                    Filter
+                    <select id="channel-filter-mode">
+                      <option value="largest" selected>Largest channels</option>
+                      <option value="minimum-volume">Minimum accessible volume</option>
+                      <option value="minimum-percent">Minimum shell percentage</option>
+                    </select>
+                  </label>
+                  <label for="channel-filter-value">
+                    Value
+                    <input
+                      id="channel-filter-value"
+                      type="number"
+                      value="2"
+                      min="0.01"
+                      step="0.01"
+                    />
+                  </label>
+                </div>
+                <small>At most 12 matching channels are combined into the browser result map.</small>
+              </fieldset>
+
+              <aside class="method-note" data-tool-controls="tunnel" hidden>
+                <strong>Coordinate-specific method</strong>
+                <span>
+                  The fixed tunnel seeds apply only to the deposited
+                  <i>Haloarcula marismortui</i> 50S structure, PDB 1JJ2.
+                </span>
+              </aside>
+
+              <div
+                class="preset-row"
+                data-tool-presets="volume"
+                aria-label="Volume preset examples"
+              >
                 <span>2LYZ presets:</span>
                 <button
                   type="button"
@@ -328,6 +509,57 @@
                   50S Ribosomal Subunit
                 </button>
               </div>
+
+              <div
+                class="preset-row"
+                data-tool-presets="volume-range"
+                aria-label="Volume Range preset examples"
+                hidden
+              >
+                <span>Preset examples:</span>
+                <button
+                  type="button"
+                  class="preset"
+                  data-preset-id="2LYZ"
+                  data-preset-grid="0.5"
+                  data-minimum-probe="0"
+                  data-maximum-probe="6"
+                  data-probe-step="1"
+                >
+                  Lysozyme probe series
+                </button>
+              </div>
+
+              <div
+                class="preset-row"
+                data-tool-presets="internal"
+                aria-label="Internal volume preset examples"
+                hidden
+              >
+                <span>Preset examples:</span>
+                <button
+                  type="button"
+                  class="preset"
+                  data-preset-id="1JJ2"
+                  data-preset-grid="2"
+                  data-big-probe="8"
+                  data-small-probe="3.4"
+                  data-trim-probe="1.5"
+                >
+                  50S Ribosomal Subunit
+                </button>
+                <button
+                  type="button"
+                  class="preset"
+                  data-preset-id="2LYZ"
+                  data-preset-grid="0.5"
+                  data-big-probe="6"
+                  data-small-probe="1.5"
+                  data-trim-probe="1.5"
+                >
+                  Lysozyme internal solvent
+                </button>
+              </div>
             </section>
           </div>
 
@@ -337,7 +569,7 @@
               <span>Use a coarser grid for larger structures.</span>
             </div>
             <button id="calculate-button" class="primary-button" type="submit">
-              Calculate volume
+              <span id="calculate-button-label">Calculate volume</span>
               <span aria-hidden="true">&rarr;</span>
             </button>
           </div>
@@ -345,7 +577,7 @@
       </section>
 
       <section id="running-panel" class="page-shell state-panel" hidden aria-live="polite">
-        <h1>Building the molecular volume...</h1>
+        <h1 id="running-title">Building the molecular volume...</h1>
         <p id="progress-label">Preparing the Volume calculation...</p>
         <div class="progress-track"><div class="progress-bar"></div></div>
         <output id="console-output" class="console" aria-label="Calculation log"></output>
@@ -396,11 +628,11 @@
           </section>
 
           <aside class="stats-card">
-            <h2>Volume information</h2>
+            <h2 id="result-summary-title">Volume information</h2>
             <dl class="primary-stats">
               <div>
                 <dt>
-                  Volume
+                  <span id="result-volume-label">Volume</span>
                   <span
                     class="help-tip"
                     tabindex="0"
@@ -413,7 +645,7 @@
               </div>
               <div>
                 <dt>
-                  Surface area
+                  <span id="result-surface-label">Surface area</span>
                   <span
                     class="help-tip"
                     tabindex="0"
@@ -486,12 +718,12 @@
                 <dd id="result-spacing"></dd>
               </div>
               <div>
-                <dt>Probe radius</dt>
+                <dt id="result-probe-label">Probe radius</dt>
                 <dd id="result-probe"></dd>
               </div>
               <div>
                 <dt>
-                  Internal cavities
+                  <span id="result-method-label">Internal cavities</span>
                   <span
                     class="help-tip"
                     tabindex="0"
@@ -505,6 +737,17 @@
             </dl>
           </aside>
         </div>
+
+        <section id="series-card" class="results-table-card" hidden>
+          <h2 id="series-title">Calculated series</h2>
+          <div class="table-scroll">
+            <table>
+              <thead id="series-head"></thead>
+              <tbody id="series-body"></tbody>
+            </table>
+          </div>
+          <p id="series-note"></p>
+        </section>
 
         <section class="downloads-card">
           <div>
@@ -520,6 +763,10 @@
             <a id="download-json" href="#">
               <strong>JSON report</strong>
               <span>Parameters, statistics, dimensions, and origin</span>
+            </a>
+            <a id="download-csv" href="#" hidden>
+              <strong>CSV table</strong>
+              <span>Probe-by-probe or component-by-component measurements</span>
             </a>
             <a id="download-pdb" href="#">
               <strong>Input PDB</strong>

@@ -1,17 +1,67 @@
 export type InputMode = "rcsb" | "upload";
 
-export type VolumeRequest = {
+export type ToolId =
+  "volume" | "volume-range" | "channel-finder" | "channel" | "solvent" | "tunnel";
+
+type BaseRequest = {
+  tool: ToolId;
   pdbText: string;
   inputLabel: string;
-  probe: number;
   gridSize: number;
   includeHetatm: boolean;
   excludeWater: boolean;
+};
+
+export type VolumeRequest = BaseRequest & {
+  tool: "volume";
+  probe: number;
   fillInternalCavities: boolean;
 };
 
-export type VolumeResult = {
+export type VolumeRangeRequest = BaseRequest & {
+  tool: "volume-range";
+  minimumProbe: number;
+  maximumProbe: number;
+  probeStep: number;
+};
+
+type DualProbeRequest = BaseRequest & {
+  bigProbe: number;
+  smallProbe: number;
+  trimProbe: number;
+};
+
+export type SolventRequest = DualProbeRequest & {
+  tool: "solvent";
+};
+
+export type ChannelRequest = DualProbeRequest & {
+  tool: "channel";
+  coordinate: { x: number; y: number; z: number };
+};
+
+export type ChannelFilter =
+  | { mode: "largest"; value: number }
+  | { mode: "minimum-volume"; value: number }
+  | { mode: "minimum-percent"; value: number };
+
+export type ChannelFinderRequest = DualProbeRequest & {
+  tool: "channel-finder";
+  filter: ChannelFilter;
+};
+
+export type TunnelRequest = DualProbeRequest & {
+  tool: "tunnel";
+};
+
+export type InternalRequest =
+  SolventRequest | ChannelRequest | ChannelFinderRequest | TunnelRequest;
+
+export type CalculationRequest = VolumeRequest | VolumeRangeRequest | InternalRequest;
+
+type GridResult = {
   ok: true;
+  tool: ToolId;
   atomCount: number;
   voxelCount: number;
   totalGridVoxels: number;
@@ -23,9 +73,6 @@ export type VolumeResult = {
   dimensions: { x: number; y: number; z: number };
   origin: { x: number; y: number; z: number };
   gridSize: number;
-  probe: number;
-  fillInternalCavities: boolean;
-  cavityVoxelsFilled: number;
   mrcBytes: number;
   previewBinFactor: 1 | 2;
   previewIsolevel: number;
@@ -34,6 +81,79 @@ export type VolumeResult = {
   previewOrigin: { x: number; y: number; z: number };
   previewMrcBytes: number;
 };
+
+export type VolumeResult = GridResult & {
+  tool: "volume";
+  probe: number;
+  fillInternalCavities: boolean;
+  cavityVoxelsFilled: number;
+};
+
+export type VolumeRangePoint = {
+  probe: number;
+  volume: number;
+  surfaceArea: number;
+  voxelCount: number;
+  totalGridVoxels: number;
+};
+
+export type VolumeRangeResult = GridResult & {
+  tool: "volume-range";
+  representativeProbe: number;
+  minimumProbe: number;
+  maximumProbe: number;
+  probeStep: number;
+  points: VolumeRangePoint[];
+};
+
+type InternalResult = GridResult & {
+  tool: "solvent" | "channel" | "channel-finder" | "tunnel";
+  bigProbe: number;
+  smallProbe: number;
+  trimProbe: number;
+  accessibleVoxelCount: number;
+  accessibleVolume: number;
+};
+
+export type SolventResult = InternalResult & {
+  tool: "solvent";
+};
+
+export type ChannelResult = InternalResult & {
+  tool: "channel";
+  coordinate: { x: number; y: number; z: number };
+};
+
+export type ChannelComponent = {
+  rank: number;
+  accessibleVoxelCount: number;
+  voxelCount: number;
+  volume: number;
+  surfaceArea: number;
+};
+
+export type ChannelFinderResult = InternalResult & {
+  tool: "channel-finder";
+  totalComponentCount: number;
+  matchedComponentCount: number;
+  selectedComponentCount: number;
+  components: ChannelComponent[];
+};
+
+export type TunnelResult = InternalResult & {
+  tool: "tunnel";
+  candidateVoxelCount: number;
+  candidateVolume: number;
+  accessiblePercent: number;
+};
+
+export type CalculationResult =
+  | VolumeResult
+  | VolumeRangeResult
+  | SolventResult
+  | ChannelResult
+  | ChannelFinderResult
+  | TunnelResult;
 
 export type MrcPreview = {
   mrc: ArrayBuffer;
@@ -44,14 +164,14 @@ export type MrcPreview = {
   dimensions: { x: number; y: number; z: number };
 };
 
-export type VolumeFailure = {
+export type CalculationFailure = {
   ok: false;
   error: string;
 };
 
 export type WorkerRequest = {
   type: "calculate";
-  request: VolumeRequest;
+  request: CalculationRequest;
 };
 
 export type WorkerProgress = {
@@ -61,7 +181,7 @@ export type WorkerProgress = {
 
 export type WorkerSuccess = {
   type: "result";
-  result: VolumeResult;
+  result: CalculationResult;
   mrc: ArrayBuffer;
   previewMrc: ArrayBuffer;
 };

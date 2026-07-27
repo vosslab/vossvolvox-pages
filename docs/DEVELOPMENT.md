@@ -94,7 +94,18 @@ bash devel/setup_playwright.sh
 
 The suite covers tool selection, RCSB and local inputs, coordinate filters, validation, resource
 limits, cancellation, presets, help, color modes, MRC/NGL placement, result controls, downloads,
-selector artwork, and the NGL viewer.
+selector artwork, viewer reset, Volume Range, and the shared internal-volume WASM path.
+
+Run each of the six tools as its own local uploaded-PDB calculation:
+
+```bash
+./run_playwright_tests.sh --build tests/playwright/ported_tools.spec.ts
+```
+
+Volume Calculation, Volume Range, and Solvent Extraction use inline PDB inputs. Channel Finder,
+Single Channel Extraction, and Exit Tunnel Extraction use the ignored native reference fixture at
+`OTHER_REPOS/vossvolvox-rust/OTHER_REPOS/vossvolvox-cpp/xyzr/1JJ2.pdb`; those three tests report a
+skip with the expected path when that local fixture is absent.
 
 Refresh the documentation screenshots from the current production build:
 

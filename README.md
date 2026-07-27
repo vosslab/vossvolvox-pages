@@ -1,14 +1,15 @@
 # 3vee molecular volume tools
 
 Explore protein and RNA structure as molecular volume. Structural biologists can measure
-solvent-excluded envelopes, surface area, and shape with a rolling probe directly in the browser.
+solvent-excluded envelopes and extract internal solvent, channels, and the ribosomal exit tunnel
+with Rust WebAssembly directly in the browser.
 
 [Run 3V in your browser](https://vosslab.github.io/vossvolvox-pages/)
 
 [Read the 3V publication](https://doi.org/10.1093/nar/gkq395)
 
-Volume Calculation is complete. Volume Range, Channel Finder, Single Channel Extraction, Solvent
-Extraction, and Exit Tunnel Extraction remain visible in the tool selector as planned ports.
+All six public 3V procedures are available: Volume Calculation, Volume Range, Channel Finder,
+Single Channel Extraction, Solvent Extraction, and Exit Tunnel Extraction.
 
 ## Why internal volume matters
 
@@ -18,9 +19,10 @@ important in large protein and RNA assemblies, where visually tracing an interna
 atomic coordinates is difficult.
 
 3V converts atomic models into volumetric representations that can be measured, visualized, and
-downloaded for further analysis. The original method identifies internal space from the difference
-between two rolling-probe molecular envelopes: a large-probe shell and a solvent-sized excluded
-surface. The current browser tool provides the foundational single-envelope Volume Calculation.
+downloaded for further analysis. The method identifies internal space from the difference between
+two rolling-probe molecular envelopes: a large-probe shell and a solvent-sized excluded surface.
+The browser implementation provides both external-envelope calculations and the two-probe internal
+volume procedures.
 
 ## From atoms to volume
 
@@ -59,9 +61,10 @@ large-probe shell - solvent-probe molecular envelope = internal solvent volume
 The large probe creates a connected outer shell across surface openings. Subtracting the
 solvent-probe envelope exposes space inside that shell that can accommodate the smaller probe.
 Enclosed components are cavities; components connected to the exterior form the generalized channel
-volume. This two-probe extraction model underlies the internal-volume tools awaiting browser ports.
+volume. Solvent Extraction returns the complete internal region, Single Channel Extraction follows
+one coordinate-seeded component, and Channel Finder ranks connected components by accessible size.
 
-The current Volume Calculation uses one probe at a time. Its **Fill internal cavities** option asks
+Volume Calculation uses one probe at a time. Its **Fill internal cavities** option asks
 whether enclosed voids should count as part of that one reported molecular envelope; it is distinct
 from extracting and characterizing cavities as separate objects.
 
@@ -107,7 +110,8 @@ the smoother outer envelope used conceptually in the two-probe internal-volume m
 The interactive NGL view overlays the calculated volume with the molecular structure. Surface
 visibility, opacity, and molecular color can be adjusted without changing the numerical result.
 Downloads include the occupancy map as gzip-compressed MRC, the exact input PDB coordinates, and a
-JSON report containing parameters and measurements.
+JSON report containing parameters and measurements. Volume Range and Channel Finder also provide
+CSV tables for their probe-by-probe or component-by-component results.
 
 ## Choose inputs deliberately
 
@@ -127,16 +131,24 @@ and experimental uncertainty require separate structures or analyses.
 
 ## Scientific browser workflow
 
+- Select one of the six external- or internal-volume procedures.
 - Retrieve an RCSB PDB entry or select a local PDB coordinate file.
 - Choose the asymmetric unit or biological assembly and the atom records to include.
+- Use Exit Tunnel Extraction only with deposited 1JJ2 coordinates; its fixed seed points come
+  from Dr. Neil Voss's PhD thesis work and are specific to that H. marismortui 50S coordinate
+  system.
 - Calculate locally in a browser worker; an uploaded structure is not sent to a calculation server.
 - Inspect volume, surface area, sphericity, effective radius, center, and calculation parameters.
+- For internal tools, inspect accessible solvent measurements, ranked components, or the
+  coordinate-seeded result.
 - Compare the molecular model with its calculated surface in the NGL viewer.
-- Export the full-resolution occupancy map and a reproducible parameter report.
+- Export the full-resolution occupancy map, reproducible parameter report, and tabular series where
+  applicable.
 
 The browser edition is an independent WebAssembly implementation of 3V. It preserves the original
 scientific method and tool organization while replacing server-side jobs with an immediate,
-interactive workflow.
+interactive workflow. Calculation variables and operation order track `vossvolvox-rust` where the
+single-threaded browser environment permits.
 
 Download results before leaving the page. The browser edition stores no job history.
 

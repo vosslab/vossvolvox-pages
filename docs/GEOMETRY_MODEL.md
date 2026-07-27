@@ -27,6 +27,27 @@ The VolumeNoCav method:
 The browser checkbox selects between these methods before calculation. It does not modify an
 already calculated density map.
 
+## Internal-volume methods
+
+Solvent Extraction, Single Channel Extraction, and Channel Finder share the native Rust
+`SolventGrids` data flow:
+
+1. Rasterize and contract a `big` outer-probe grid.
+2. Contract that grid by the trim probe to form `trim`.
+3. Rasterize the `small` solvent-probe grid.
+4. Subtract `small` from `trim` to form probe-accessible internal solvent.
+5. Grow selected accessible regions by the small probe and intersect them with `trim` to form the
+   solvent-excluded output.
+
+Single Channel Extraction chooses the connected accessible component containing a Cartesian seed.
+Channel Finder ranks connected components by accessible voxel count, applies one size filter, and
+combines at most 12 selected excluded components into one browser MRC while retaining their
+individual measurements in CSV and JSON.
+
+Exit Tunnel Extraction follows the native `Tunnel.exe` shell, channel, fixed-seed connectivity,
+probe-growth, and shell-intersection order. The fixed seeds originate in Dr. Neil Voss's PhD
+thesis work and apply to the deposited 1JJ2 coordinate system.
+
 ## Numerical contract
 
 - Atom coordinates, radii, probe radius, and grid spacing use 32-bit floating point to match the
@@ -64,4 +85,7 @@ already calculated density map.
 - This repository is an independent WebAssembly implementation alongside the C++ and Rust
   codebases. Features may be ported between them when useful, but browser constraints and release
   priorities determine which features reach parity.
+- WASM calculation names and operation order intentionally track `vossvolvox-rust`. The explicit
+  browser divergences are the C ABI, Web Worker orchestration, sequential single-threaded raster
+  and contraction routines, and browser-oriented result artifacts.
 - Preview binning does not change reported measurements or the downloadable MRC.

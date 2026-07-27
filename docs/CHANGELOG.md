@@ -4,6 +4,11 @@
 
 ### Additions and New Features
 
+- Ported Volume Range, Channel Finder, Single Channel Extraction, Solvent Extraction, and Exit
+  Tunnel Extraction into the GitHub Pages application with shared Rust/WASM calculation,
+  Web Worker, result, MRC, JSON, CSV, and NGL viewer paths.
+- Added Rust characterization coverage for ranked channel selection and strict native-style volume
+  and percentage cutoffs.
 - Added `docs/HUMAN_GUIDANCE.md` to preserve the project's scientific audience, independent WASM
   ownership, selective feature-parity goals, low-level voxel-processing boundary, supported
   inputs and formats, and review priorities.
@@ -35,6 +40,14 @@
 
 ### Behavior or Interface Changes
 
+- Marked all six selector tools available and added tool-specific probe ranges, coordinates,
+  channel-size filters, presets, status text, measurement tables, and download descriptions.
+- Kept the browser calculation variables and operation order close to `vossvolvox-rust`; isolated
+  browser-specific behavior to the C ABI, worker, sequential execution, combined map, and
+  representative-map boundaries.
+- Represented a Volume Range as a complete numerical CSV/JSON series plus the final-probe MRC, and
+  represented Channel Finder as a ranked component table plus one combined MRC capped at 12
+  selected channels.
 - Added "Very high - 0.40 A" and "Ultra - 0.25 A" grid choices while retaining 0.50 angstrom as
   the default, with approximate relative voxel costs shown beside the selector.
 - Removed hard minimum and maximum grid-spacing checks from WASM; any finite positive spacing is
@@ -82,6 +95,12 @@
 
 ### Fixes and Maintenance
 
+- Prevented delayed gzip or NGL result rendering from restoring stale downloads or viewer data
+  after New calculation or tool navigation invalidates the completed run.
+- Cleared and disposed the NGL stage, viewer DOM, viewer metadata, control state, result tables,
+  downloads, and calculation references whenever a user selects New calculation or changes tools.
+- Documented that the fixed deposited-1JJ2 tunnel seeds originated in Dr. Neil Voss's PhD thesis
+  work and remain specific to the H. marismortui 50S coordinate system.
 - Removed the Chromium installation and Playwright browser suite from the GitHub Pages deployment
   path; the workflow now builds, runs the focused scientific parity gate, and publishes `dist/`.
 - Made Playwright's managed static server invoke Bash explicitly so Linux does not run the
@@ -132,6 +151,27 @@
 
 ### Developer Tests and Notes
 
+- Audited the test suite against `docs/PYTEST_STYLE.md`: all 490 fast pytest checks pass, each
+  remains well under one second, the browser tests remain in the designated Playwright lane, and
+  no tests need deletion or relocation.
+- Added separate local uploaded-PDB Playwright calculations for all six tools. Channel Finder,
+  Single Channel, and Exit Tunnel reuse the ignored native 1JJ2 reference when it is available and
+  otherwise skip with its expected local path.
+- Added a delayed-gzip browser regression proving New calculation invalidates asynchronous result
+  rendering before stale downloads or NGL viewer state can return.
+- Matched the production WASM internal tools against the native v26.07 Rust binaries on 1JJ2 at a
+  2.00-angstrom grid: Solvent returned 266,328 cubic angstroms, 146,035.438 square angstroms, and
+  7,451 accessible voxels; Single Channel returned 12,224 cubic angstroms, 4,773.046 square
+  angstroms, and 394 accessible voxels; the two largest Channel Finder results were 26,944 and
+  19,648 cubic angstroms; and Exit Tunnel returned 16,472 cubic angstroms, 5,956.040 square
+  angstroms, 4,760 accessible cubic angstroms, and 5.013 percent accessibility.
+- Added browser regression coverage for clearing NGL DOM and metadata on New calculation, all
+  newly available tool routes, a three-point Volume Range with CSV and representative MRC, and a
+  deterministic internal Solvent Extraction through production WASM.
+- Refreshed the managed `tool_selector.png`, `volume_setup.png`, and `volume_results.png`
+  documentation captures through `./tools/capture_readme_screenshots.sh`; the selector now records
+  all six procedures as available.
+- Confirmed all 34 Playwright tests pass against a fresh production build.
 - Added Rust characterization tests for opt-in cavity filling and for preview resolution
   selection, normalized bin-2 density, coordinate/extent preservation, and incomplete-block
   rejection.

@@ -358,7 +358,8 @@ h2 {
 .calculation-card,
 .stats-card,
 .viewer-card,
-.downloads-card {
+.downloads-card,
+.results-table-card {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -576,6 +577,68 @@ hr {
 
 .filter-grid {
   margin-top: 18px;
+}
+
+.tool-specific-fields,
+.method-note {
+  padding: 14px;
+  margin: 18px 0 0;
+  background: var(--subtle-bg);
+  border: 1px solid var(--subtle-border);
+  border-radius: 12px;
+}
+
+.tool-specific-fields legend {
+  padding: 0 6px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.tool-specific-fields > small,
+.method-note span {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.77rem;
+  line-height: 1.5;
+}
+
+.coordinate-grid,
+.channel-filter-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.coordinate-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.channel-filter-grid {
+  grid-template-columns: minmax(0, 1.5fr) minmax(100px, 0.5fr);
+}
+
+.coordinate-grid label,
+.channel-filter-grid label {
+  color: var(--muted);
+  font-size: 0.77rem;
+  font-weight: 750;
+}
+
+.coordinate-grid input,
+.channel-filter-grid input,
+.channel-filter-grid select {
+  margin-top: 6px;
+}
+
+.method-note strong,
+.method-note span {
+  display: block;
+}
+
+.method-note strong {
+  color: var(--accent-bright);
+  font-size: 0.82rem;
 }
 
 .check-row.compact {
@@ -939,6 +1002,53 @@ hr {
   font-size: 0.79rem;
 }
 
+.results-table-card {
+  padding: 24px;
+  margin-top: 22px;
+}
+
+.results-table-card h2 {
+  margin-bottom: 14px;
+}
+
+.results-table-card > p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.results-table-card table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.results-table-card th,
+.results-table-card td {
+  padding: 10px 12px;
+  text-align: right;
+  border-bottom: 1px solid var(--subtle-border);
+}
+
+.results-table-card th:first-child,
+.results-table-card td:first-child {
+  text-align: left;
+}
+
+.results-table-card th {
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.03em;
+}
+
+.results-table-card td {
+  font-size: 0.82rem;
+}
+
 .downloads-card {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
@@ -953,7 +1063,7 @@ hr {
 
 .download-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 

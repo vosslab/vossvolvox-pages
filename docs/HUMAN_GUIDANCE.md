@@ -20,6 +20,9 @@ Durable project decisions for the browser implementation of 3vee tools.
 - Keep every application-owned operation proportional to the voxel count in low-level Rust/WASM
   running in a Web Worker. TypeScript coordinates input, buffers, interface state, downloads, and
   third-party visualization.
+- Keep WASM calculation variables, data flow, and operation order close to `vossvolvox-rust` when
+  browser constraints permit. Isolate necessary browser divergences at the ABI, worker, sequential
+  execution, and browser-artifact boundaries so future feature parity remains straightforward.
 - Use native browser streaming APIs for compression and decompression when they already perform
   the large-byte operation outside application JavaScript.
 - Base calculation limits on total voxel and memory cost rather than imposing an arbitrary

@@ -2,17 +2,22 @@ import { Stage } from "ngl";
 import type { RepresentationElement } from "ngl";
 
 import type {
+  CalculationRequest,
+  CalculationResult,
+  ChannelFilter,
+  ChannelFinderResult,
   InputMode,
   MrcPreview,
+  ToolId,
+  VolumeRangeResult,
   VolumeRequest,
-  VolumeResult,
   WorkerRequest,
   WorkerResponse,
 } from "./volume_types";
 
 type CompletedRun = {
-  request: VolumeRequest;
-  result: VolumeResult;
+  request: CalculationRequest;
+  result: CalculationResult;
   mrc: ArrayBuffer;
   previewMrc: ArrayBuffer;
   elapsedSeconds: number;
@@ -32,9 +37,88 @@ type ViewerTheme = {
   chainColors: string[];
 };
 
+type ToolDefinition = {
+  id: ToolId;
+  hash: string;
+  title: string;
+  description: string;
+  parameterDescription: string;
+  action: string;
+  runningTitle: string;
+  resultTitle: string;
+};
+
 const ANGSTROM = "\u00c5";
 const ANGSTROM_SQUARED = `${ANGSTROM}\u00b2`;
 const ANGSTROM_CUBED = `${ANGSTROM}\u00b3`;
+const INTERNAL_TOOLS: readonly ToolId[] = ["channel-finder", "channel", "solvent", "tunnel"];
+const TOOL_DEFINITIONS: Record<ToolId, ToolDefinition> = {
+  volume: {
+    id: "volume",
+    hash: "#volume",
+    title: "Volume Calculation",
+    description:
+      "Voxel-based solvent-excluded volume and surface-area calculation for PDB coordinates.",
+    parameterDescription: "Probe radius, voxel spacing, and coordinate-record filters.",
+    action: "Calculate volume",
+    runningTitle: "Building the molecular volume...",
+    resultTitle: "Volume information",
+  },
+  "volume-range": {
+    id: "volume-range",
+    hash: "#volume-range",
+    title: "Volume Range",
+    description:
+      "Compare molecular volume and surface area across a controlled series of probe radii.",
+    parameterDescription: "Probe range, voxel spacing, and coordinate-record filters.",
+    action: "Calculate volume range",
+    runningTitle: "Calculating the probe series...",
+    resultTitle: "Representative volume information",
+  },
+  "channel-finder": {
+    id: "channel-finder",
+    hash: "#channel-finder",
+    title: "Channel Finder",
+    description: "Find major connected internal solvent regions and rank them by accessible size.",
+    parameterDescription: "Outer shell, inner solvent probe, size filter, and voxel spacing.",
+    action: "Find channels",
+    runningTitle: "Finding connected internal channels...",
+    resultTitle: "Selected channel union",
+  },
+  channel: {
+    id: "channel",
+    hash: "#channel",
+    title: "Single Channel Extraction",
+    description:
+      "Extract the connected internal solvent region containing a known Cartesian coordinate.",
+    parameterDescription: "Outer shell, inner solvent probe, seed coordinate, and voxel spacing.",
+    action: "Extract channel",
+    runningTitle: "Extracting the selected channel...",
+    resultTitle: "Channel information",
+  },
+  solvent: {
+    id: "solvent",
+    hash: "#solvent",
+    title: "Solvent Extraction",
+    description:
+      "Extract all internal solvent volume between outer-shell and inner-probe surfaces.",
+    parameterDescription: "Outer shell, inner solvent probe, trim radius, and voxel spacing.",
+    action: "Extract solvent",
+    runningTitle: "Extracting internal solvent...",
+    resultTitle: "Internal solvent information",
+  },
+  tunnel: {
+    id: "tunnel",
+    hash: "#tunnel",
+    title: "Exit Tunnel Extraction",
+    description:
+      "Extract the polypeptide exit tunnel from the deposited H. marismortui 50S structure.",
+    parameterDescription: "Ribosomal shell, tunnel probe, trim radius, and voxel spacing.",
+    action: "Extract exit tunnel",
+    runningTitle: "Extracting the ribosomal exit tunnel...",
+    resultTitle: "Exit tunnel information",
+  },
+};
 const VIEWER_THEMES: Record<Theme, ViewerTheme> = {
   dark: {
     backgroundColor: "#07131f",
@@ -74,7 +158,23 @@ const recenterButton = requireElement<HTMLButtonElement>("recenter-button");
 const fullscreenButton = requireElement<HTMLButtonElement>("fullscreen-button");
 const themeToggle = requireElement<HTMLButtonElement>("theme-toggle");
 const breadcrumbs = requireElement<HTMLElement>("breadcrumbs");
+const toolTitle = requireElement<HTMLElement>("tool-title");
+const toolDescription = requireElement<HTMLElement>("tool-description");
+const parameterDescription = requireElement<HTMLElement>("parameter-description");
+const calculateButtonLabel = requireElement<HTMLElement>("calculate-button-label");
+const runningTitle = requireElement<HTMLElement>("running-title");
+const resultSummaryTitle = requireElement<HTMLElement>("result-summary-title");
+const resultProbeLabel = requireElement<HTMLElement>("result-probe-label");
+const resultMethodLabel = requireElement<HTMLElement>("result-method-label");
+const viewerResolution = requireElement<HTMLElement>("viewer-resolution");
+const seriesCard = requireElement<HTMLElement>("series-card");
+const seriesTitle = requireElement<HTMLElement>("series-title");
+const seriesHead = requireElement<HTMLElement>("series-head");
+const seriesBody = requireElement<HTMLElement>("series-body");
+const seriesNote = requireElement<HTMLElement>("series-note");
+const csvDownload = requireElement<HTMLAnchorElement>("download-csv");
 
+let activeTool: ToolId = "volume";
 let worker: Worker | undefined;
 let inputAbortController: AbortController | undefined;
 let startedAt = 0;
@@ -92,6 +192,10 @@ function requireElement<T extends HTMLElement>(id: string): T {
     throw new Error(`Required element #${id} is missing.`);
   }
   return element as T;
+}
+
+function isInternalTool(tool: ToolId): boolean {
+  return INTERNAL_TOOLS.includes(tool);
 }
 
 function applyTheme(theme: Theme): void {
@@ -114,7 +218,7 @@ function saveTheme(theme: Theme): void {
   try {
     window.localStorage.setItem("3vee-theme", theme);
   } catch {
-    // The selected theme still applies to this page when browser storage is unavailable.
+    // The selected theme still applies when browser storage is unavailable.
   }
 }
 
@@ -191,6 +295,15 @@ function readNumber(id: string, minimum: number, maximum: number): number {
   return value;
 }
 
+function readFiniteNumber(id: string): number {
+  const input = requireElement<HTMLInputElement>(id);
+  const value = Number(input.value);
+  if (!Number.isFinite(value)) {
+    throw new Error(`${input.labels?.[0]?.textContent ?? id} must be a finite number.`);
+  }
+  return value;
+}
+
 function readPositiveNumber(id: string): number {
   const input = requireElement<HTMLInputElement>(id);
   const value = Number(input.value);
@@ -200,18 +313,87 @@ function readPositiveNumber(id: string): number {
   return value;
 }
 
-async function buildRequest(signal: AbortSignal): Promise<VolumeRequest> {
-  const input = await readInput(signal);
-  const request: VolumeRequest = {
+function commonRequest(input: { text: string; label: string }): {
+  pdbText: string;
+  inputLabel: string;
+  gridSize: number;
+  includeHetatm: boolean;
+  excludeWater: boolean;
+} {
+  return {
     pdbText: input.text,
     inputLabel: input.label,
-    probe: readNumber("probe-radius", 0, 20),
     gridSize: readPositiveNumber("grid-size"),
     includeHetatm: requireElement<HTMLInputElement>("include-hetatm").checked,
     excludeWater: requireElement<HTMLInputElement>("exclude-water").checked,
-    fillInternalCavities: requireElement<HTMLInputElement>("fill-internal-cavities").checked,
   };
-  return request;
+}
+
+function channelFilter(): ChannelFilter {
+  const mode = requireElement<HTMLSelectElement>("channel-filter-mode").value;
+  const value = readPositiveNumber("channel-filter-value");
+  if (mode === "largest") {
+    return { mode, value: Math.round(value) };
+  }
+  if (mode === "minimum-volume" || mode === "minimum-percent") {
+    return { mode, value };
+  }
+  throw new Error("Choose a valid Channel Finder filter.");
+}
+
+async function buildRequest(signal: AbortSignal): Promise<CalculationRequest> {
+  const input = await readInput(signal);
+  const shared = commonRequest(input);
+  if (activeTool === "volume") {
+    const request: VolumeRequest = {
+      tool: "volume",
+      ...shared,
+      probe: readNumber("probe-radius", 0, 20),
+      fillInternalCavities: requireElement<HTMLInputElement>("fill-internal-cavities").checked,
+    };
+    return request;
+  }
+  if (activeTool === "volume-range") {
+    const minimumProbe = readNumber("minimum-probe", 0, 20);
+    const maximumProbe = readNumber("maximum-probe", 0, 20);
+    const probeStep = readPositiveNumber("probe-step");
+    if (maximumProbe < minimumProbe) {
+      throw new Error("Maximum probe radius must be at least the minimum probe radius.");
+    }
+    return {
+      tool: "volume-range",
+      ...shared,
+      minimumProbe,
+      maximumProbe,
+      probeStep,
+    };
+  }
+
+  const bigProbe = readNumber("big-probe", 0.1, 40);
+  const smallProbe = readNumber("small-probe", 0, 40);
+  const trimProbe = readNumber("trim-probe", 0, 20);
+  if (smallProbe > bigProbe) {
+    throw new Error("Inner probe radius must not exceed the outer probe radius.");
+  }
+  const internal = { ...shared, bigProbe, smallProbe, trimProbe };
+  if (activeTool === "channel") {
+    return {
+      tool: "channel",
+      ...internal,
+      coordinate: {
+        x: readFiniteNumber("coordinate-x"),
+        y: readFiniteNumber("coordinate-y"),
+        z: readFiniteNumber("coordinate-z"),
+      },
+    };
+  }
+  if (activeTool === "channel-finder") {
+    return { tool: "channel-finder", ...internal, filter: channelFilter() };
+  }
+  if (activeTool === "solvent") {
+    return { tool: "solvent", ...internal };
+  }
+  return { tool: "tunnel", ...internal };
 }
 
 function appendConsole(message: string): void {
@@ -240,6 +422,7 @@ function updateBreadcrumbs(panel: HTMLElement): void {
     return;
   }
 
+  const definition = TOOL_DEFINITIONS[activeTool];
   const list = document.createElement("ol");
   const toolsItem = document.createElement("li");
   const toolsLink = document.createElement("a");
@@ -248,24 +431,24 @@ function updateBreadcrumbs(panel: HTMLElement): void {
   toolsItem.append(toolsLink);
   list.append(toolsItem);
 
-  const volumeItem = document.createElement("li");
+  const toolItem = document.createElement("li");
   if (panel === setupPanel) {
     const current = document.createElement("span");
-    current.textContent = "Volume Calculation";
+    current.textContent = definition.title;
     current.ariaCurrent = "page";
-    volumeItem.append(current);
+    toolItem.append(current);
   } else {
-    const volumeLink = document.createElement("a");
-    volumeLink.href = "#volume";
-    volumeLink.textContent = "Volume Calculation";
-    volumeLink.addEventListener("click", (event) => {
+    const toolLink = document.createElement("a");
+    toolLink.href = definition.hash;
+    toolLink.textContent = definition.title;
+    toolLink.addEventListener("click", (event) => {
       event.preventDefault();
-      window.history.replaceState(null, "", "#volume");
+      window.history.replaceState(null, "", definition.hash);
       resetForNewCalculation();
     });
-    volumeItem.append(volumeLink);
+    toolItem.append(toolLink);
   }
-  list.append(volumeItem);
+  list.append(toolItem);
 
   if (panel !== setupPanel) {
     const stateItem = document.createElement("li");
@@ -281,7 +464,6 @@ function updateBreadcrumbs(panel: HTMLElement): void {
     stateItem.append(current);
     list.append(stateItem);
   }
-
   breadcrumbs.replaceChildren(list);
   breadcrumbs.hidden = false;
 }
@@ -297,13 +479,30 @@ function stopActiveCalculation(): void {
   stopWorker();
 }
 
+function parameterSummary(request: CalculationRequest): string {
+  if (request.tool === "volume") {
+    return `Probe ${request.probe.toFixed(2)} ${ANGSTROM}; grid ${request.gridSize.toFixed(2)} ${ANGSTROM}`;
+  }
+  if (request.tool === "volume-range") {
+    return (
+      `Probes ${request.minimumProbe.toFixed(2)}-${request.maximumProbe.toFixed(2)} ` +
+      `${ANGSTROM}; step ${request.probeStep.toFixed(2)} ${ANGSTROM}`
+    );
+  }
+  return (
+    `Outer probe ${request.bigProbe.toFixed(2)} ${ANGSTROM}; ` +
+    `inner probe ${request.smallProbe.toFixed(2)} ${ANGSTROM}; ` +
+    `grid ${request.gridSize.toFixed(2)} ${ANGSTROM}`
+  );
+}
+
 async function startCalculation(): Promise<void> {
   stopActiveCalculation();
   const controller = new AbortController();
   inputAbortController = controller;
   consoleOutput.textContent = "";
   showPanel(runningPanel);
-  appendConsole("Preparing the Volume calculation...");
+  appendConsole(`Preparing the ${TOOL_DEFINITIONS[activeTool].title} calculation...`);
   submitButton.disabled = true;
   try {
     const request = await buildRequest(controller.signal);
@@ -312,10 +511,7 @@ async function startCalculation(): Promise<void> {
     }
     inputAbortController = undefined;
     appendConsole(`Input ready: ${request.inputLabel}`);
-    appendConsole(
-      `Probe ${request.probe.toFixed(2)} ${ANGSTROM}; ` +
-        `grid ${request.gridSize.toFixed(2)} ${ANGSTROM}`,
-    );
+    appendConsole(parameterSummary(request));
     startedAt = performance.now();
     worker = new Worker(new URL("./volume_worker.js", import.meta.url), {
       type: "module",
@@ -338,7 +534,7 @@ async function startCalculation(): Promise<void> {
   }
 }
 
-function handleWorkerMessage(response: WorkerResponse, request: VolumeRequest): void {
+function handleWorkerMessage(response: WorkerResponse, request: CalculationRequest): void {
   if (response.type === "progress") {
     appendConsole(response.message);
     return;
@@ -348,16 +544,20 @@ function handleWorkerMessage(response: WorkerResponse, request: VolumeRequest): 
     return;
   }
   const elapsedSeconds = (performance.now() - startedAt) / 1000;
-  currentRun = {
+  const completedRun: CompletedRun = {
     request,
     result: response.result,
     mrc: response.mrc,
     previewMrc: response.previewMrc,
     elapsedSeconds,
   };
+  currentRun = completedRun;
   appendConsole("Program completed successfully.");
   stopWorker();
-  void renderResults(currentRun).catch((error: unknown) => {
+  void renderResults(completedRun).catch((error: unknown) => {
+    if (currentRun !== completedRun) {
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     showError(message);
   });
@@ -382,6 +582,51 @@ function formatCoordinate(value: number): string {
   return value.toFixed(1);
 }
 
+function probeResultText(run: CompletedRun): string {
+  const result = run.result;
+  if (result.tool === "volume") {
+    return `${result.probe.toFixed(2)} ${ANGSTROM}`;
+  }
+  if (result.tool === "volume-range") {
+    return `${result.minimumProbe.toFixed(2)}-${result.maximumProbe.toFixed(2)} ${ANGSTROM}`;
+  }
+  return (
+    `${result.bigProbe.toFixed(2)} ${ANGSTROM} outer; ` +
+    `${result.smallProbe.toFixed(2)} ${ANGSTROM} inner; ` +
+    `${result.trimProbe.toFixed(2)} ${ANGSTROM} trim`
+  );
+}
+
+function methodResultText(result: CalculationResult): string {
+  if (result.tool === "volume") {
+    return result.fillInternalCavities
+      ? `Filled (${formatInteger(result.cavityVoxelsFilled)} accessible-grid voxels)`
+      : "Not filled";
+  }
+  if (result.tool === "volume-range") {
+    return `Map shown at ${result.representativeProbe.toFixed(2)} ${ANGSTROM}`;
+  }
+  if (result.tool === "channel-finder") {
+    return `${result.selectedComponentCount} of ${result.matchedComponentCount} matching`;
+  }
+  return `${formatInteger(result.accessibleVolume)} ${ANGSTROM_CUBED} accessible`;
+}
+
+function configureResultLabels(result: CalculationResult): void {
+  resultSummaryTitle.textContent = TOOL_DEFINITIONS[result.tool].resultTitle;
+  if (result.tool === "volume") {
+    resultProbeLabel.textContent = "Probe radius";
+    resultMethodLabel.textContent = "Internal cavities";
+  } else if (result.tool === "volume-range") {
+    resultProbeLabel.textContent = "Probe range";
+    resultMethodLabel.textContent = "Representative map";
+  } else {
+    resultProbeLabel.textContent = "Probe radii";
+    resultMethodLabel.textContent =
+      result.tool === "channel-finder" ? "Selected components" : "Accessible volume";
+  }
+}
+
 async function renderResults(run: CompletedRun): Promise<void> {
   const result = run.result;
   setResultText("result-input", run.request.inputLabel);
@@ -402,24 +647,26 @@ async function renderResults(run: CompletedRun): Promise<void> {
     `${result.dimensions.x} x ${result.dimensions.y} x ${result.dimensions.z}`,
   );
   setResultText("result-spacing", `${result.gridSize.toFixed(2)} ${ANGSTROM}`);
-  setResultText("result-probe", `${result.probe.toFixed(2)} ${ANGSTROM}`);
-  const cavityTreatment = result.fillInternalCavities
-    ? `Filled (${formatInteger(result.cavityVoxelsFilled)} accessible-grid voxels)`
-    : "Not filled";
-  setResultText("result-cavities", cavityTreatment);
+  setResultText("result-probe", probeResultText(run));
+  setResultText("result-cavities", methodResultText(result));
+  configureResultLabels(result);
+  renderSeries(result);
   elapsedOutput.textContent = `${run.elapsedSeconds.toFixed(2)} seconds`;
   const preview = createMrcPreview(run);
   viewerElement.dataset["previewBin"] = String(preview.binFactor);
-  const viewerResolution = requireElement<HTMLElement>("viewer-resolution");
   viewerResolution.textContent =
     preview.binFactor === 1
       ? `Surface preview uses the full ${result.gridSize.toFixed(2)} ${ANGSTROM} grid.`
       : `Surface preview is binned ${preview.binFactor}x to ${preview.spacing.toFixed(2)} ${ANGSTROM}; values and downloads remain full resolution.`;
   showPanel(resultsPanel);
-  await wireDownloads(run);
+  if (!(await wireDownloads(run))) {
+    return;
+  }
   run.mrc = new ArrayBuffer(0);
   run.previewMrc = new ArrayBuffer(0);
-  await renderViewer(run, preview);
+  if (!(await renderViewer(run, preview))) {
+    return;
+  }
   submitButton.disabled = false;
 }
 
@@ -437,6 +684,54 @@ function createMrcPreview(run: CompletedRun): MrcPreview {
     origin: result.previewOrigin,
     dimensions: result.previewDimensions,
   };
+}
+
+function appendTableRow(values: string[], header = false): void {
+  const row = document.createElement("tr");
+  for (const value of values) {
+    const cell = document.createElement(header ? "th" : "td");
+    cell.textContent = value;
+    row.append(cell);
+  }
+  if (header) {
+    seriesHead.append(row);
+  } else {
+    seriesBody.append(row);
+  }
+}
+
+function renderSeries(result: CalculationResult): void {
+  seriesHead.replaceChildren();
+  seriesBody.replaceChildren();
+  seriesCard.hidden = result.tool !== "volume-range" && result.tool !== "channel-finder";
+  if (result.tool === "volume-range") {
+    seriesTitle.textContent = "Probe-radius series";
+    appendTableRow(["Probe", "Volume", "Surface area", "Filled voxels"], true);
+    for (const point of result.points) {
+      appendTableRow([
+        `${point.probe.toFixed(2)} ${ANGSTROM}`,
+        `${formatInteger(point.volume)} ${ANGSTROM_CUBED}`,
+        `${formatInteger(point.surfaceArea)} ${ANGSTROM_SQUARED}`,
+        formatInteger(point.voxelCount),
+      ]);
+    }
+    seriesNote.textContent = `The viewer and MRC download use the final ${result.representativeProbe.toFixed(2)} ${ANGSTROM} probe.`;
+  } else if (result.tool === "channel-finder") {
+    seriesTitle.textContent = "Ranked selected channels";
+    appendTableRow(["Rank", "Accessible volume", "Excluded volume", "Surface area"], true);
+    for (const component of result.components) {
+      const accessibleVolume = component.accessibleVoxelCount * result.gridSize ** 3;
+      appendTableRow([
+        String(component.rank),
+        `${formatInteger(accessibleVolume)} ${ANGSTROM_CUBED}`,
+        `${formatInteger(component.volume)} ${ANGSTROM_CUBED}`,
+        `${formatInteger(component.surfaceArea)} ${ANGSTROM_SQUARED}`,
+      ]);
+    }
+    seriesNote.textContent =
+      `${result.matchedComponentCount} components matched; the largest ` +
+      `${result.selectedComponentCount} are combined in the viewer and MRC.`;
+  }
 }
 
 function createDownload(id: string, blob: Blob, filename: string): void {
@@ -460,12 +755,103 @@ async function gzipBlob(blob: Blob): Promise<Blob | undefined> {
   }
 }
 
-async function wireDownloads(run: CompletedRun): Promise<void> {
+function clearDownloadUrls(): void {
   for (const url of downloadUrls.splice(0)) {
     URL.revokeObjectURL(url);
   }
-  const stem = run.request.inputLabel.replace(/\.pdb$/i, "").replace(/[^a-z0-9_-]+/gi, "_");
-  const volumeMethod = run.request.fillInternalCavities ? "volume-no-cav" : "volume";
+  for (const anchor of document.querySelectorAll<HTMLAnchorElement>(".download-grid a")) {
+    anchor.removeAttribute("download");
+    anchor.href = "#";
+  }
+  csvDownload.hidden = true;
+}
+
+function resultStem(request: CalculationRequest): string {
+  return request.inputLabel.replace(/\.pdb$/i, "").replace(/[^a-z0-9_-]+/gi, "_");
+}
+
+function methodName(request: CalculationRequest): string {
+  if (request.tool === "volume") {
+    return request.fillInternalCavities ? "volume-no-cav" : "volume";
+  }
+  return request.tool;
+}
+
+function requestParameters(request: CalculationRequest): object {
+  const common = {
+    tool: request.tool,
+    gridSize: request.gridSize,
+    includeHetatm: request.includeHetatm,
+    excludeWater: request.excludeWater,
+  };
+  if (request.tool === "volume") {
+    return {
+      ...common,
+      probe: request.probe,
+      fillInternalCavities: request.fillInternalCavities,
+    };
+  }
+  if (request.tool === "volume-range") {
+    return {
+      ...common,
+      minimumProbe: request.minimumProbe,
+      maximumProbe: request.maximumProbe,
+      probeStep: request.probeStep,
+    };
+  }
+  const probes = {
+    ...common,
+    bigProbe: request.bigProbe,
+    smallProbe: request.smallProbe,
+    trimProbe: request.trimProbe,
+  };
+  if (request.tool === "channel") {
+    return { ...probes, coordinate: request.coordinate };
+  }
+  if (request.tool === "channel-finder") {
+    return { ...probes, filter: request.filter };
+  }
+  return probes;
+}
+
+function csvText(result: VolumeRangeResult | ChannelFinderResult): string {
+  if (result.tool === "volume-range") {
+    const rows = ["probe_A,volume_A3,surface_area_A2,filled_voxels,bounding_grid_voxels"];
+    for (const point of result.points) {
+      rows.push(
+        [
+          point.probe.toFixed(6),
+          point.volume.toFixed(6),
+          point.surfaceArea.toFixed(6),
+          String(point.voxelCount),
+          String(point.totalGridVoxels),
+        ].join(","),
+      );
+    }
+    return `${rows.join("\n")}\n`;
+  }
+  const rows = [
+    "rank,accessible_voxels,accessible_volume_A3,excluded_voxels,excluded_volume_A3,surface_area_A2",
+  ];
+  for (const component of result.components) {
+    rows.push(
+      [
+        String(component.rank),
+        String(component.accessibleVoxelCount),
+        (component.accessibleVoxelCount * result.gridSize ** 3).toFixed(6),
+        String(component.voxelCount),
+        component.volume.toFixed(6),
+        component.surfaceArea.toFixed(6),
+      ].join(","),
+    );
+  }
+  return `${rows.join("\n")}\n`;
+}
+
+async function wireDownloads(run: CompletedRun): Promise<boolean> {
+  clearDownloadUrls();
+  const stem = resultStem(run.request);
+  const method = methodName(run.request);
   createDownload(
     "download-pdb",
     new Blob([run.request.pdbText], { type: "chemical/x-pdb" }),
@@ -473,49 +859,65 @@ async function wireDownloads(run: CompletedRun): Promise<void> {
   );
   const rawMrc = new Blob([run.mrc], { type: "application/octet-stream" });
   const compressedMrc = await gzipBlob(rawMrc);
+  if (currentRun !== run) {
+    return false;
+  }
   const mrcLabel = requireElement<HTMLElement>("download-mrc-label");
   const mrcDescription = requireElement<HTMLElement>("download-mrc-description");
+  const mapDescription =
+    run.result.tool === "channel-finder"
+      ? "Combined occupancy map for the selected ranked channels"
+      : "Occupancy map for the displayed result";
   if (compressedMrc === undefined) {
     mrcLabel.textContent = "MRC density map";
-    mrcDescription.textContent = "Uncompressed occupancy map; gzip is unavailable in this browser";
-    createDownload("download-mrc", rawMrc, `${stem}-${volumeMethod}.mrc`);
+    mrcDescription.textContent = `${mapDescription}; gzip is unavailable in this browser`;
+    createDownload("download-mrc", rawMrc, `${stem}-${method}.mrc`);
   } else {
     mrcLabel.textContent = "MRC density map (.gz)";
-    mrcDescription.textContent =
-      "Gzip-compressed occupancy map; decompress if required by your viewer";
-    createDownload("download-mrc", compressedMrc, `${stem}-${volumeMethod}.mrc.gz`);
+    mrcDescription.textContent = `${mapDescription}; decompress if required by your viewer`;
+    createDownload("download-mrc", compressedMrc, `${stem}-${method}.mrc.gz`);
   }
   const report = {
     input: run.request.inputLabel,
     elapsedSeconds: run.elapsedSeconds,
-    parameters: {
-      probe: run.request.probe,
-      gridSize: run.request.gridSize,
-      includeHetatm: run.request.includeHetatm,
-      excludeWater: run.request.excludeWater,
-      fillInternalCavities: run.request.fillInternalCavities,
-    },
+    parameters: requestParameters(run.request),
     results: run.result,
   };
   createDownload(
     "download-json",
     new Blob([JSON.stringify(report, undefined, 2)], { type: "application/json" }),
-    `${stem}-${volumeMethod}-results.json`,
+    `${stem}-${method}-results.json`,
   );
+  if (run.result.tool === "volume-range" || run.result.tool === "channel-finder") {
+    csvDownload.hidden = false;
+    createDownload(
+      "download-csv",
+      new Blob([csvText(run.result)], { type: "text/csv" }),
+      `${stem}-${method}-results.csv`,
+    );
+  }
+  return true;
 }
 
-async function renderViewer(run: CompletedRun, preview: MrcPreview): Promise<void> {
-  stage?.dispose();
+async function renderViewer(run: CompletedRun, preview: MrcPreview): Promise<boolean> {
   const viewerTheme = VIEWER_THEMES[currentTheme()];
-  stage = new Stage(viewerElement, {
+  const renderStage = new Stage(viewerElement, {
     backgroundColor: viewerTheme.backgroundColor,
     quality: "medium",
   });
-  stage.setParameters({ cameraType: "orthographic" });
-  const loadedMolecule = await stage.loadFile(
+  stage = renderStage;
+  renderStage.setParameters({ cameraType: "orthographic" });
+  const loadedMolecule = await renderStage.loadFile(
     new Blob([run.request.pdbText], { type: "chemical/x-pdb" }),
     { ext: "pdb", defaultRepresentation: false },
   );
+  if (currentRun !== run) {
+    renderStage.dispose();
+    if (stage === renderStage) {
+      stage = undefined;
+    }
+    return false;
+  }
   if (loadedMolecule === undefined) {
     throw new Error("NGL did not return a molecule component.");
   }
@@ -528,10 +930,17 @@ async function renderViewer(run: CompletedRun, preview: MrcPreview): Promise<voi
     sele: "hetero and not water",
     colorScheme: "element",
   });
-  const loadedSurface = await stage.loadFile(
+  const loadedSurface = await renderStage.loadFile(
     new Blob([preview.mrc], { type: "application/octet-stream" }),
     { ext: "mrc", defaultRepresentation: false },
   );
+  if (currentRun !== run) {
+    renderStage.dispose();
+    if (stage === renderStage) {
+      stage = undefined;
+    }
+    return false;
+  }
   if (loadedSurface === undefined) {
     throw new Error("NGL did not return a volume component.");
   }
@@ -547,8 +956,9 @@ async function renderViewer(run: CompletedRun, preview: MrcPreview): Promise<voi
   }) as RepresentationElement;
   applyViewerTheme(currentTheme());
   updateSurfaceOpacity();
-  stage.autoView();
+  renderStage.autoView();
   updateViewerVisibility();
+  return true;
 }
 
 function verifyVolumePlacement(volume: NglVolumeObject, preview: MrcPreview): void {
@@ -595,16 +1005,38 @@ function updateSurfaceOpacity(): void {
   stage?.viewer.requestRender();
 }
 
-function clearCalculationState(): void {
-  stopActiveCalculation();
+function resetViewer(): void {
   stage?.dispose();
   stage = undefined;
   moleculeComponent = undefined;
   surfaceComponent = undefined;
   moleculeRepresentation = undefined;
   surfaceRepresentation = undefined;
-  delete viewerElement.dataset["surfaceOpacity"];
-  delete viewerElement.dataset["volumeOrigin"];
+  viewerElement.replaceChildren();
+  for (const key of [
+    "surfaceOpacity",
+    "volumeOrigin",
+    "previewBin",
+    "viewerTheme",
+    "viewerBackground",
+    "surfaceColor",
+  ]) {
+    delete viewerElement.dataset[key];
+  }
+  surfaceToggle.checked = true;
+  moleculeToggle.checked = true;
+  opacityInput.value = "0.35";
+  opacityOutput.value = "35%";
+  viewerResolution.textContent = "";
+}
+
+function clearCalculationState(): void {
+  stopActiveCalculation();
+  resetViewer();
+  clearDownloadUrls();
+  seriesCard.hidden = true;
+  seriesHead.replaceChildren();
+  seriesBody.replaceChildren();
   currentRun = undefined;
   submitButton.disabled = false;
 }
@@ -619,22 +1051,85 @@ function showToolSelector(): void {
   showPanel(toolSelectorPanel);
 }
 
-function syncToolRoute(): void {
-  if (window.location.hash === "#volume") {
-    showPanel(setupPanel);
-    return;
+function toolFromHash(): ToolId | undefined {
+  for (const definition of Object.values(TOOL_DEFINITIONS)) {
+    if (definition.hash === window.location.hash) {
+      return definition.id;
+    }
   }
-  showToolSelector();
+  return undefined;
 }
 
-function applyPreset(id: string, probe: string, grid: string): void {
+function configureToolForm(): void {
+  const definition = TOOL_DEFINITIONS[activeTool];
+  toolTitle.textContent = definition.title;
+  toolDescription.textContent = definition.description;
+  parameterDescription.textContent = definition.parameterDescription;
+  calculateButtonLabel.textContent = definition.action;
+  runningTitle.textContent = definition.runningTitle;
+
+  for (const element of document.querySelectorAll<HTMLElement>("[data-tool-controls]")) {
+    const group = element.dataset["toolControls"];
+    const isActive = group === activeTool || (group === "internal" && isInternalTool(activeTool));
+    element.hidden = !isActive;
+    for (const control of element.querySelectorAll<
+      HTMLInputElement | HTMLSelectElement | HTMLButtonElement
+    >("input, select, button")) {
+      control.disabled = !isActive;
+    }
+  }
+  for (const element of document.querySelectorAll<HTMLElement>("[data-tool-presets]")) {
+    const group = element.dataset["toolPresets"];
+    element.hidden = group !== activeTool && !(group === "internal" && isInternalTool(activeTool));
+  }
+  if (activeTool === "tunnel") {
+    requireElement<HTMLInputElement>("mode-rcsb").checked = true;
+    setInputMode("rcsb");
+    pdbIdInput.value = "1JJ2";
+    biologicalUnitInput.checked = false;
+    requireElement<HTMLInputElement>("big-probe").value = "10";
+    requireElement<HTMLInputElement>("small-probe").value = "3";
+    requireElement<HTMLInputElement>("trim-probe").value = "3";
+    requireElement<HTMLSelectElement>("grid-size").value = "0.75";
+  }
+}
+
+function syncToolRoute(): void {
+  const tool = toolFromHash();
+  if (tool === undefined) {
+    showToolSelector();
+    return;
+  }
+  activeTool = tool;
+  clearCalculationState();
+  configureToolForm();
+  showPanel(setupPanel);
+}
+
+function setInputValue(id: string, value: string | undefined): void {
+  if (value !== undefined) {
+    requireElement<HTMLInputElement | HTMLSelectElement>(id).value = value;
+  }
+}
+
+function applyPreset(button: HTMLButtonElement): void {
+  const id = button.dataset["presetId"];
+  if (id === undefined) {
+    return;
+  }
   requireElement<HTMLInputElement>("mode-rcsb").checked = true;
   setInputMode("rcsb");
   pdbIdInput.value = id;
   biologicalUnitInput.checked = false;
   requireElement<HTMLInputElement>("include-hetatm").checked = false;
-  requireElement<HTMLInputElement>("probe-radius").value = probe;
-  requireElement<HTMLInputElement>("grid-size").value = grid;
+  setInputValue("probe-radius", button.dataset["presetProbe"]);
+  setInputValue("grid-size", button.dataset["presetGrid"]);
+  setInputValue("minimum-probe", button.dataset["minimumProbe"]);
+  setInputValue("maximum-probe", button.dataset["maximumProbe"]);
+  setInputValue("probe-step", button.dataset["probeStep"]);
+  setInputValue("big-probe", button.dataset["bigProbe"]);
+  setInputValue("small-probe", button.dataset["smallProbe"]);
+  setInputValue("trim-probe", button.dataset["trimProbe"]);
 }
 
 form.addEventListener("submit", (event) => {
@@ -647,14 +1142,7 @@ for (const radio of form.querySelectorAll<HTMLInputElement>('input[name="input-m
 }
 
 for (const preset of document.querySelectorAll<HTMLButtonElement>("[data-preset-id]")) {
-  preset.addEventListener("click", () => {
-    const id = preset.dataset["presetId"];
-    const probe = preset.dataset["presetProbe"];
-    const grid = preset.dataset["presetGrid"];
-    if (id !== undefined && probe !== undefined && grid !== undefined) {
-      applyPreset(id, probe, grid);
-    }
-  });
+  preset.addEventListener("click", () => applyPreset(preset));
 }
 
 cancelButton.addEventListener("click", () => {
@@ -679,9 +1167,7 @@ window.addEventListener("resize", () => stage?.handleResize());
 window.addEventListener("hashchange", syncToolRoute);
 window.addEventListener("beforeunload", () => {
   stopActiveCalculation();
-  for (const url of downloadUrls) {
-    URL.revokeObjectURL(url);
-  }
+  clearDownloadUrls();
 });
 
 applyTheme(loadTheme());
