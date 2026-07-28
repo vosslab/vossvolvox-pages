@@ -37,6 +37,8 @@ jobs:
         run: npm ci
       - name: Check source
         run: ./check_codebase.sh
+      - name: Run Rust tests
+        run: cargo test --manifest-path wasm/Cargo.toml --locked
       - name: Build production site
         run: ./build_github_pages.sh
       - name: Verify scientific parity and MRC placement
