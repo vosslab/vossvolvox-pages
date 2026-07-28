@@ -4,6 +4,11 @@
 
 ### Additions and New Features
 
+- Added local `.pdb.gz`, `.pdb1.gz`, and `.ent.gz` uploads through the same browser-native gzip
+  decoder used for RCSB biological assemblies, including gzip magic-byte detection.
+- Added `docs/active_plans/audits/full_codebase_review.md` with the complete evidence-backed
+  codebase review, corrected and deferred findings, scientific and deployment risks, uploaded-file
+  validation analysis, full test evidence, and prioritized follow-up recommendations.
 - Ported Volume Range, Channel Finder, Single Channel Extraction, Solvent Extraction, and Exit
   Tunnel Extraction into the GitHub Pages application with shared Rust/WASM calculation,
   Web Worker, result, MRC, JSON, CSV, and NGL viewer paths.
@@ -49,6 +54,8 @@
 
 ### Behavior or Interface Changes
 
+- Report files without PDB `ATOM` or `HETATM` coordinate records directly instead of describing
+  images, executables, scripts, or unrelated text as atom-filter failures.
 - Reworked the repeat-use tool selector into a stable one-to-two category grid with equal-width,
   image-first cards, measured per-tool color identities in dark and light modes, and more useful
   vertical spacing; removed the redundant "Available" label from all six working tools.
@@ -110,6 +117,14 @@
 
 ### Fixes and Maintenance
 
+- Referred to the Pages workflow as `deploy-pages.yml` in the codebase review instead of
+  hard-linking its activated `.github/workflows/` location.
+- Corrected full-resolution occupancy MRC headers to report exact binary-map minimum, maximum, mean,
+  and RMS statistics.
+- Added the locked Rust unit suite to both the active GitHub Pages deployment workflow and its
+  repository-root seed.
+- Unified remote and local gzip decompression errors and preserved clean download stems for
+  compressed PDB filenames.
 - Prevented delayed gzip or NGL result rendering from restoring stale downloads or viewer data
   after New calculation or tool navigation invalidates the completed run.
 - Cleared and disposed the NGL stage, viewer DOM, viewer metadata, control state, result tables,
@@ -186,6 +201,11 @@
 
 ### Developer Tests and Notes
 
+- Added durable Rust and browser regressions for MRC density statistics, non-PDB image rejection,
+  valid and invalid local gzip uploads, observed local-file privacy, and cancellation during a
+  delayed local read.
+- Confirmed all 9 Rust unit tests, 497 fast Python checks, 5 source checks, the complete scientific
+  parity gate, and all 39 Playwright browser tests pass against a fresh production build.
 - Measured all six selector title accents against their real card surfaces: dark-mode ratios range
   from 10.41:1 to 13.44:1 and light-mode ratios range from 6.27:1 to 7.60:1, exceeding the
   repository's 5.5:1 house target.

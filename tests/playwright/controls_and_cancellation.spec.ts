@@ -248,3 +248,50 @@ test("cancelling an in-flight RCSB fetch cannot resume the old calculation", asy
   await expect(page.getByRole("heading", { name: "Volume Calculation" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Volume information" })).toBeHidden();
 });
+
+test("cancelling a delayed local read cannot resume the old calculation", async ({ page }) => {
+  await page.addInitScript(() => {
+    type LocalReadGateWindow = Window & {
+      localReadEntered?: boolean;
+      localReadSettled?: boolean;
+      releaseLocalRead?: () => void;
+    };
+    const gateWindow = window as LocalReadGateWindow;
+    // The override must call the native method with each intercepted File as its receiver.
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const originalText = File.prototype.text;
+    let releaseLocalRead: (() => void) | undefined;
+    const localReadMayFinish = new Promise<void>((resolve) => {
+      releaseLocalRead = resolve;
+    });
+    gateWindow.releaseLocalRead = releaseLocalRead;
+    File.prototype.text = async function (): Promise<string> {
+      gateWindow.localReadEntered = true;
+      await localReadMayFinish;
+      const text = await originalText.call(this);
+      gateWindow.localReadSettled = true;
+      return text;
+    };
+  });
+  await page.goto("/");
+  await loadUploadedPdb(page);
+  await page.getByRole("button", { name: "Calculate volume" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as Window & { localReadEntered?: boolean }).localReadEntered),
+    )
+    .toBe(true);
+
+  await page.getByRole("button", { name: "Cancel calculation" }).click();
+  await page.evaluate(() =>
+    (window as Window & { releaseLocalRead?: () => void }).releaseLocalRead?.(),
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as Window & { localReadSettled?: boolean }).localReadSettled),
+    )
+    .toBe(true);
+
+  await expect(page.getByRole("heading", { name: "Volume Calculation" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Volume information" })).toBeHidden();
+});

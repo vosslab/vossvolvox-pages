@@ -286,6 +286,32 @@ function activeInputMode(): InputMode {
   return checked.value as InputMode;
 }
 
+async function readGzipText(
+  stream: ReadableStream<BufferSource> | null,
+  sourceLabel: string,
+): Promise<string> {
+  if (typeof DecompressionStream === "undefined") {
+    throw new Error(`This browser cannot decompress ${sourceLabel}.`);
+  }
+  if (stream === null) {
+    throw new Error(`${sourceLabel} did not contain a readable body.`);
+  }
+  try {
+    const decompressed = stream.pipeThrough(new DecompressionStream("gzip"));
+    return await new Response(decompressed).text();
+  } catch {
+    throw new Error(`Could not decompress ${sourceLabel}.`);
+  }
+}
+
+async function fileIsGzipped(file: File): Promise<boolean> {
+  if (/\.gz$/i.test(file.name) || file.type === "application/gzip") {
+    return true;
+  }
+  const signature = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+  return signature[0] === 0x1f && signature[1] === 0x8b;
+}
+
 async function fetchPdb(signal: AbortSignal): Promise<{ text: string; label: string }> {
   const id = pdbIdInput.value.trim().toUpperCase();
   if (!/^[0-9][A-Z0-9]{3}$/.test(id)) {
@@ -306,14 +332,7 @@ async function fetchPdb(signal: AbortSignal): Promise<{ text: string; label: str
   if (!response.ok) {
     throw new Error(`RCSB returned HTTP ${response.status} for biological assembly ${id}.`);
   }
-  if (typeof DecompressionStream === "undefined") {
-    throw new Error("This browser cannot decompress an RCSB biological assembly.");
-  }
-  const decompressed = response.body?.pipeThrough(new DecompressionStream("gzip"));
-  if (decompressed === undefined) {
-    throw new Error("The biological-assembly response did not contain a readable body.");
-  }
-  const text = await new Response(decompressed).text();
+  const text = await readGzipText(response.body, "the RCSB biological assembly");
   return { text, label: `${id}-assembly1.pdb` };
 }
 
@@ -329,7 +348,13 @@ async function readInput(signal: AbortSignal): Promise<{ text: string; label: st
   if (file.size > 30_000_000) {
     throw new Error("The PDB file is larger than the 30 MB input limit.");
   }
-  return { text: await file.text(), label: file.name };
+  const gzipped = await fileIsGzipped(file);
+  signal.throwIfAborted();
+  const text = gzipped
+    ? await readGzipText(file.stream(), `the uploaded file ${file.name}`)
+    : await file.text();
+  signal.throwIfAborted();
+  return { text, label: file.name };
 }
 
 function readNumber(id: string, minimum: number, maximum: number): number {
@@ -1064,7 +1089,9 @@ function clearDownloadUrls(): void {
 }
 
 function resultStem(request: CalculationRequest): string {
-  return request.inputLabel.replace(/\.pdb$/i, "").replace(/[^a-z0-9_-]+/gi, "_");
+  return request.inputLabel
+    .replace(/\.(?:pdb(?:\d+)?|ent)(?:\.gz)?$/i, "")
+    .replace(/[^a-z0-9_-]+/gi, "_");
 }
 
 function methodName(request: CalculationRequest): string {

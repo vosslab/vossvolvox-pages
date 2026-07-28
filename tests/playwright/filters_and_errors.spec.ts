@@ -70,6 +70,32 @@ test("too few valid atoms are rejected by the WASM engine", async ({ page }) => 
   await expect(page.locator("#error-message")).toContainText("fewer than three valid atoms");
 });
 
+test("an uploaded image is reported as missing PDB coordinate records", async ({ page }) => {
+  await page.goto("/");
+  await openVolumeTool(page);
+  await page.getByText("Upload file", { exact: true }).click();
+  await page.getByLabel("PDB file", { exact: true }).setInputFiles({
+    name: "not-a-structure.png",
+    mimeType: "image/png",
+    buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  });
+  await page.getByRole("button", { name: "Calculate volume" }).click();
+
+  await expect(page.locator("#error-message")).toHaveText(
+    "This file does not contain PDB ATOM or HETATM coordinate records.",
+  );
+});
+
+test("an invalid gzip upload reports decompression failure", async ({ page }) => {
+  await page.goto("/");
+  await loadUploadedPdb(page, "This is not gzip data.", "broken.pdb.gz");
+  await page.getByRole("button", { name: "Calculate volume" }).click();
+
+  await expect(page.locator("#error-message")).toHaveText(
+    "Could not decompress the uploaded file broken.pdb.gz.",
+  );
+});
+
 test("bounding grids above 64 million voxels stop with recovery guidance", async ({ page }) => {
   await page.goto("/");
   await calculateUploadedPdb(page, OVER_LIMIT_PDB, "0.5");

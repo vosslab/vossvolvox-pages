@@ -792,6 +792,15 @@ fn parse_atoms(
     if input.is_empty() {
         return Err("The PDB input is empty.".to_string());
     }
+    if !input.split(|byte| *byte == b'\n').any(|line| {
+        line.get(..6).is_some_and(|record| {
+            record.eq_ignore_ascii_case(b"ATOM  ") || record.eq_ignore_ascii_case(b"HETATM")
+        })
+    }) {
+        return Err(
+            "This file does not contain PDB ATOM or HETATM coordinate records.".to_string(),
+        );
+    }
     let options = PdbOptions {
         use_united: true,
         filters: Filters {
@@ -1164,6 +1173,11 @@ fn write_mrc_bytes(grid: &Grid3D) -> Result<Vec<u8>, String> {
         .checked_add(grid.total_voxels)
         .and_then(|size| size.checked_add(guard_bytes))
         .ok_or_else(|| "The MRC output size exceeds browser memory.".to_string())?;
+    let occupied_voxels = grid.count_filled();
+    let mean = occupied_voxels as f32 / grid.total_voxels as f32;
+    let minimum = f32::from(occupied_voxels == grid.total_voxels);
+    let maximum = f32::from(occupied_voxels > 0);
+    let rms = (mean * (1.0 - mean)).sqrt();
     let mut output = Vec::<u8>::with_capacity(capacity);
     output.extend_from_slice(&write_mrc_header(&MrcHeader {
         dimensions: [grid.len_i, grid.len_j, grid.len_k],
@@ -1175,10 +1189,10 @@ fn write_mrc_bytes(grid: &Grid3D) -> Result<Vec<u8>, String> {
         ],
         mode: MRC_MODE_SIGNED_BYTE,
         origin: [grid.x_shift, grid.y_shift, grid.z_shift],
-        minimum: 0.0,
-        maximum: 0.0,
-        mean: 0.0,
-        rms: 0.0,
+        minimum,
+        maximum,
+        mean,
+        rms,
     })?);
     for bit in &grid.data {
         output.push(u8::from(*bit));
@@ -1422,7 +1436,8 @@ mod tests {
     use super::{
         CHANNEL_FILTER_LARGEST, CHANNEL_FILTER_MINIMUM_PERCENT, CHANNEL_FILTER_MINIMUM_VOLUME,
         MRC_HEADER_BYTES, closest_filled_coordinate, crop_occupied_grid,
-        fill_cavities_if_requested, select_channels, write_binned_preview_mrc, write_preview_mrc,
+        fill_cavities_if_requested, parse_atoms, select_channels, write_binned_preview_mrc,
+        write_mrc_bytes, write_preview_mrc,
     };
     use vossvolvox::voxel_grid::grid::Grid3D;
 
@@ -1517,6 +1532,36 @@ mod tests {
             .expect("non-divisible dimensions should fail");
 
         assert!(error.contains("divisible by bin factor 2"));
+    }
+
+    #[test]
+    fn occupancy_mrc_header_reports_binary_density_statistics() {
+        let mut grid = Grid3D::new(2, 2, 2, 1.0);
+        grid.set_voxel_ijk(0, 0, 0, true);
+        grid.set_voxel_ijk(1, 1, 1, true);
+
+        let mrc = write_mrc_bytes(&grid).unwrap();
+
+        assert_eq!(
+            [read_f32(&mrc, 76), read_f32(&mrc, 80), read_f32(&mrc, 84)],
+            [0.0, 1.0, 0.25]
+        );
+        assert!((read_f32(&mrc, 216) - (0.25_f32 * 0.75).sqrt()).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn unrelated_text_is_not_reported_as_filtered_pdb_atoms() {
+        let error = parse_atoms(
+            b"This is an image description, not a PDB file.",
+            false,
+            true,
+        )
+        .expect_err("text without coordinate records should fail");
+
+        assert_eq!(
+            error,
+            "This file does not contain PDB ATOM or HETATM coordinate records."
+        );
     }
 
     #[test]

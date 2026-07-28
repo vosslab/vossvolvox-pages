@@ -48,6 +48,13 @@ test("RCSB biological assembly is decompressed in the browser", async ({ page })
 
 test("uploaded PDB stays local and keeps its filename", async ({ page }) => {
   await page.goto("/");
+  const pageOrigin = new URL(page.url()).origin;
+  const remoteRequests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).origin !== pageOrigin) {
+      remoteRequests.push(request.url());
+    }
+  });
   await openVolumeTool(page);
   await page.getByText("Upload file", { exact: true }).click();
   await page.getByLabel("PDB file", { exact: true }).setInputFiles({
@@ -58,6 +65,35 @@ test("uploaded PDB stays local and keeps its filename", async ({ page }) => {
   await page.getByLabel("Grid spacing", { exact: true }).selectOption("2");
   await page.getByRole("button", { name: "Calculate volume" }).click();
 
-  await expect(page.locator("#result-input")).toHaveText("local-example.pdb");
-  await expect(page.locator("#result-atoms")).toHaveText("5");
+  await expect
+    .poll(() =>
+      Promise.all([
+        page.locator("#result-input").textContent(),
+        page.locator("#result-atoms").textContent(),
+      ]),
+    )
+    .toEqual(["local-example.pdb", "5"]);
+  expect(remoteRequests).toEqual([]);
+});
+
+test("uploaded gzip PDB is decompressed locally", async ({ page }) => {
+  await page.goto("/");
+  await openVolumeTool(page);
+  await page.getByText("Upload file", { exact: true }).click();
+  await page.getByLabel("PDB file", { exact: true }).setInputFiles({
+    name: "local-example.pdb.gz",
+    mimeType: "application/gzip",
+    buffer: gzipSync(Buffer.from(SMALL_PDB)),
+  });
+  await page.getByLabel("Grid spacing", { exact: true }).selectOption("2");
+  await page.getByRole("button", { name: "Calculate volume" }).click();
+
+  await expect
+    .poll(() =>
+      Promise.all([
+        page.locator("#result-input").textContent(),
+        page.locator("#result-atoms").textContent(),
+      ]),
+    )
+    .toEqual(["local-example.pdb.gz", "5"]);
 });
