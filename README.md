@@ -109,11 +109,16 @@ the smoother outer envelope used conceptually in the two-probe internal-volume m
 | Center | Average Cartesian position of occupied voxels |
 | MRC map | Full-resolution occupancy volume for visualization or further analysis |
 
-The interactive NGL view overlays the calculated volume with the molecular structure. Surface
-visibility, opacity, and molecular color can be adjusted without changing the numerical result.
-Downloads include the occupancy map as gzip-compressed MRC, the exact input PDB coordinates, and a
-JSON report containing parameters and measurements. Volume Range and Channel Finder also provide
-CSV tables for their probe-by-probe or component-by-component results.
+The interactive NGL view overlays calculated volumes with one molecular structure and one shared
+camera. Volume Range defaults to the six 1 through 6 angstrom probe steps and shows every step as a
+separately colored, selectable surface so the progression of smoothing can be inspected directly.
+Channel Finder shows each ranked channel separately, reports its center of mass, and can carry a
+safe coordinate directly into Single Channel Extraction.
+
+Downloads include gzip-compressed MRC occupancy maps, the exact input PDB coordinates, and a JSON
+report containing parameters and measurements. Volume Range and Channel Finder provide CSV tables,
+stable color-to-layer mappings, and an individual MRC for every displayed result so the same
+surfaces can be examined offline.
 
 ## Choose inputs deliberately
 

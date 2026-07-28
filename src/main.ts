@@ -4,11 +4,12 @@ import type { RepresentationElement } from "ngl";
 import type {
   CalculationRequest,
   CalculationResult,
+  ChannelComponent,
   ChannelFilter,
   ChannelFinderResult,
   InputMode,
-  MrcPreview,
   ToolId,
+  ViewerSurface,
   VolumeRangeResult,
   VolumeRequest,
   WorkerRequest,
@@ -19,7 +20,7 @@ type CompletedRun = {
   request: CalculationRequest;
   result: CalculationResult;
   mrc: ArrayBuffer;
-  previewMrc: ArrayBuffer;
+  viewerSurfaces: ViewerSurface[];
   elapsedSeconds: number;
 };
 
@@ -37,6 +38,23 @@ type ViewerTheme = {
   chainColors: string[];
 };
 
+type RenderedSurface = {
+  artifact: ViewerSurface;
+  component: Awaited<ReturnType<Stage["loadFile"]>>;
+  representation: RepresentationElement;
+  color: string;
+  visible: boolean;
+};
+
+type SurfaceMetrics = {
+  volume: number;
+  surfaceArea: number;
+  sphericity: number;
+  effectiveRadius: number;
+  center: { x: number; y: number; z: number };
+  voxelCount: number;
+};
+
 type ToolDefinition = {
   id: ToolId;
   hash: string;
@@ -52,6 +70,28 @@ const ANGSTROM = "\u00c5";
 const ANGSTROM_SQUARED = `${ANGSTROM}\u00b2`;
 const ANGSTROM_CUBED = `${ANGSTROM}\u00b3`;
 const INTERNAL_TOOLS: readonly ToolId[] = ["channel-finder", "channel", "solvent", "tunnel"];
+const VOLUME_RANGE_COLORS = [
+  "#eab308",
+  "#ea7c14",
+  "#e0526f",
+  "#b05ed7",
+  "#548ad8",
+  "#159cb0",
+] as const;
+const CHANNEL_COLORS = [
+  "#159cb0",
+  "#e07816",
+  "#ad5bd3",
+  "#34965a",
+  "#d14d87",
+  "#4b79d1",
+  "#d4544c",
+  "#aa7b05",
+  "#168a76",
+  "#7357c7",
+  "#a55e3b",
+  "#64748b",
+] as const;
 const TOOL_DEFINITIONS: Record<ToolId, ToolDefinition> = {
   volume: {
     id: "volume",
@@ -73,7 +113,7 @@ const TOOL_DEFINITIONS: Record<ToolId, ToolDefinition> = {
     parameterDescription: "Probe range, voxel spacing, and coordinate-record filters.",
     action: "Calculate volume range",
     runningTitle: "Calculating the probe series...",
-    resultTitle: "Representative volume information",
+    resultTitle: "Volume range information",
   },
   "channel-finder": {
     id: "channel-finder",
@@ -151,6 +191,7 @@ const errorMessage = requireElement<HTMLElement>("error-message");
 const elapsedOutput = requireElement<HTMLElement>("elapsed-output");
 const viewerElement = requireElement<HTMLElement>("viewer");
 const surfaceToggle = requireElement<HTMLInputElement>("surface-toggle");
+const surfaceToggleLabel = requireElement<HTMLElement>("surface-toggle-label");
 const moleculeToggle = requireElement<HTMLInputElement>("molecule-toggle");
 const opacityInput = requireElement<HTMLInputElement>("surface-opacity");
 const opacityOutput = requireElement<HTMLOutputElement>("surface-opacity-value");
@@ -167,6 +208,11 @@ const resultSummaryTitle = requireElement<HTMLElement>("result-summary-title");
 const resultProbeLabel = requireElement<HTMLElement>("result-probe-label");
 const resultMethodLabel = requireElement<HTMLElement>("result-method-label");
 const viewerResolution = requireElement<HTMLElement>("viewer-resolution");
+const surfaceLayerPanel = requireElement<HTMLElement>("surface-layer-panel");
+const surfaceLayerCount = requireElement<HTMLElement>("surface-layer-count");
+const surfaceLayerList = requireElement<HTMLElement>("surface-layer-list");
+const showAllSurfacesButton = requireElement<HTMLButtonElement>("show-all-surfaces");
+const isolateSurfaceButton = requireElement<HTMLButtonElement>("isolate-surface");
 const seriesCard = requireElement<HTMLElement>("series-card");
 const seriesTitle = requireElement<HTMLElement>("series-title");
 const seriesHead = requireElement<HTMLElement>("series-head");
@@ -181,9 +227,9 @@ let startedAt = 0;
 let currentRun: CompletedRun | undefined;
 let stage: Stage | undefined;
 let moleculeComponent: Awaited<ReturnType<Stage["loadFile"]>> | undefined;
-let surfaceComponent: Awaited<ReturnType<Stage["loadFile"]>> | undefined;
 let moleculeRepresentation: RepresentationElement | undefined;
-let surfaceRepresentation: RepresentationElement | undefined;
+let renderedSurfaces: RenderedSurface[] = [];
+let selectedSurfaceId: string | undefined;
 const downloadUrls: string[] = [];
 
 function requireElement<T extends HTMLElement>(id: string): T {
@@ -548,7 +594,7 @@ function handleWorkerMessage(response: WorkerResponse, request: CalculationReque
     request,
     result: response.result,
     mrc: response.mrc,
-    previewMrc: response.previewMrc,
+    viewerSurfaces: response.viewerSurfaces,
     elapsedSeconds,
   };
   currentRun = completedRun;
@@ -604,7 +650,7 @@ function methodResultText(result: CalculationResult): string {
       : "Not filled";
   }
   if (result.tool === "volume-range") {
-    return `Map shown at ${result.representativeProbe.toFixed(2)} ${ANGSTROM}`;
+    return `${result.points.length} probe surfaces`;
   }
   if (result.tool === "channel-finder") {
     return `${result.selectedComponentCount} of ${result.matchedComponentCount} matching`;
@@ -619,7 +665,7 @@ function configureResultLabels(result: CalculationResult): void {
     resultMethodLabel.textContent = "Internal cavities";
   } else if (result.tool === "volume-range") {
     resultProbeLabel.textContent = "Probe range";
-    resultMethodLabel.textContent = "Representative map";
+    resultMethodLabel.textContent = "Layered surfaces";
   } else {
     resultProbeLabel.textContent = "Probe radii";
     resultMethodLabel.textContent =
@@ -627,20 +673,24 @@ function configureResultLabels(result: CalculationResult): void {
   }
 }
 
+function renderMetrics(metrics: SurfaceMetrics): void {
+  setResultText("result-volume", `${formatInteger(metrics.volume)} ${ANGSTROM_CUBED}`);
+  setResultText("result-surface", `${formatInteger(metrics.surfaceArea)} ${ANGSTROM_SQUARED}`);
+  setResultText("result-sphericity", metrics.sphericity.toFixed(3));
+  setResultText("result-radius", `${metrics.effectiveRadius.toFixed(2)} ${ANGSTROM}`);
+  setResultText(
+    "result-center",
+    `(${formatCoordinate(metrics.center.x)}, ${formatCoordinate(metrics.center.y)}, ` +
+      `${formatCoordinate(metrics.center.z)}) ${ANGSTROM}`,
+  );
+  setResultText("result-voxels", formatInteger(metrics.voxelCount));
+}
+
 async function renderResults(run: CompletedRun): Promise<void> {
   const result = run.result;
   setResultText("result-input", run.request.inputLabel);
-  setResultText("result-volume", `${formatInteger(result.volume)} ${ANGSTROM_CUBED}`);
-  setResultText("result-surface", `${formatInteger(result.surfaceArea)} ${ANGSTROM_SQUARED}`);
-  setResultText("result-sphericity", result.sphericity.toFixed(3));
-  setResultText("result-radius", `${result.effectiveRadius.toFixed(2)} ${ANGSTROM}`);
-  setResultText(
-    "result-center",
-    `(${formatCoordinate(result.center.x)}, ${formatCoordinate(result.center.y)}, ` +
-      `${formatCoordinate(result.center.z)}) ${ANGSTROM}`,
-  );
+  renderMetrics(result);
   setResultText("result-atoms", formatInteger(result.atomCount));
-  setResultText("result-voxels", formatInteger(result.voxelCount));
   setResultText("result-total-voxels", formatInteger(result.totalGridVoxels));
   setResultText(
     "result-grid",
@@ -650,40 +700,40 @@ async function renderResults(run: CompletedRun): Promise<void> {
   setResultText("result-probe", probeResultText(run));
   setResultText("result-cavities", methodResultText(result));
   configureResultLabels(result);
-  renderSeries(result);
+  renderSeries(run);
+  renderLayerControls(run);
+  surfaceToggleLabel.textContent = run.viewerSurfaces.length > 1 ? "Surfaces" : "Surface";
   elapsedOutput.textContent = `${run.elapsedSeconds.toFixed(2)} seconds`;
-  const preview = createMrcPreview(run);
-  viewerElement.dataset["previewBin"] = String(preview.binFactor);
-  viewerResolution.textContent =
-    preview.binFactor === 1
-      ? `Surface preview uses the full ${result.gridSize.toFixed(2)} ${ANGSTROM} grid.`
-      : `Surface preview is binned ${preview.binFactor}x to ${preview.spacing.toFixed(2)} ${ANGSTROM}; values and downloads remain full resolution.`;
+  const firstSurface = run.viewerSurfaces[0];
+  if (firstSurface === undefined) {
+    throw new Error("The completed calculation did not provide a viewer surface.");
+  }
+  const binnedSurfaces = run.viewerSurfaces.filter((surface) => surface.binFactor > 1);
+  viewerElement.dataset["previewBin"] = String(
+    Math.max(...run.viewerSurfaces.map((surface) => surface.binFactor)),
+  );
+  if (run.viewerSurfaces.length === 1) {
+    viewerResolution.textContent =
+      firstSurface.binFactor === 1
+        ? `Surface preview uses the full ${result.gridSize.toFixed(2)} ${ANGSTROM} grid.`
+        : `Surface preview is binned ${firstSurface.binFactor}x to ` +
+          `${firstSurface.spacing.toFixed(2)} ${ANGSTROM}; values and downloads remain full resolution.`;
+  } else {
+    viewerResolution.textContent =
+      binnedSurfaces.length === 0
+        ? `Surface layers use their full ${result.gridSize.toFixed(2)} ${ANGSTROM} grids.`
+        : `${binnedSurfaces.length} surface layer previews are binned; ` +
+          "measurements and downloads remain full resolution.";
+  }
   showPanel(resultsPanel);
   if (!(await wireDownloads(run))) {
     return;
   }
   run.mrc = new ArrayBuffer(0);
-  run.previewMrc = new ArrayBuffer(0);
-  if (!(await renderViewer(run, preview))) {
+  if (!(await renderViewer(run))) {
     return;
   }
   submitButton.disabled = false;
-}
-
-function createMrcPreview(run: CompletedRun): MrcPreview {
-  const result = run.result;
-  const mrc = result.previewBinFactor === 1 ? run.mrc : run.previewMrc;
-  if (mrc.byteLength === 0) {
-    throw new Error("The WASM engine did not return the required NGL preview map.");
-  }
-  return {
-    mrc,
-    binFactor: result.previewBinFactor,
-    isolevel: result.previewIsolevel,
-    spacing: result.previewGridSize,
-    origin: result.previewOrigin,
-    dimensions: result.previewDimensions,
-  };
 }
 
 function appendTableRow(values: string[], header = false): void {
@@ -700,42 +750,289 @@ function appendTableRow(values: string[], header = false): void {
   }
 }
 
-function renderSeries(result: CalculationResult): void {
+function surfaceColor(surface: ViewerSurface, index: number): string {
+  if (surface.kind === "probe") {
+    return VOLUME_RANGE_COLORS[index % VOLUME_RANGE_COLORS.length]!;
+  }
+  if (surface.kind === "channel") {
+    return CHANNEL_COLORS[(surface.value - 1) % CHANNEL_COLORS.length]!;
+  }
+  return VIEWER_THEMES[currentTheme()].surfaceColor;
+}
+
+function appendLayerLabel(cell: HTMLTableCellElement, surface: ViewerSurface): void {
+  const wrapper = document.createElement("span");
+  wrapper.className = "layer-label";
+  const swatch = document.createElement("span");
+  swatch.className = "surface-swatch";
+  swatch.style.backgroundColor = surfaceColor(surface, runSurfaceIndex(surface.id));
+  const button = document.createElement("button");
+  button.className = "layer-action";
+  button.type = "button";
+  button.textContent = surface.label;
+  button.addEventListener("click", () => selectSurface(surface.id));
+  wrapper.append(swatch, button);
+  cell.append(wrapper);
+}
+
+function appendLayerDownload(cell: HTMLTableCellElement, surface: ViewerSurface): void {
+  const anchor = document.createElement("a");
+  anchor.className = "layer-download";
+  anchor.dataset["surfaceDownload"] = surface.id;
+  anchor.href = "#";
+  anchor.textContent = "Preparing MRC";
+  cell.append(anchor);
+}
+
+function appendChannelHandoff(cell: HTMLTableCellElement, component: ChannelComponent): void {
+  const button = document.createElement("button");
+  button.className = "layer-action";
+  button.type = "button";
+  button.textContent = "Extract this channel";
+  button.addEventListener("click", () => portChannelToExtractor(component));
+  cell.append(button);
+}
+
+function renderSeries(run: CompletedRun): void {
+  const result = run.result;
   seriesHead.replaceChildren();
   seriesBody.replaceChildren();
   seriesCard.hidden = result.tool !== "volume-range" && result.tool !== "channel-finder";
   if (result.tool === "volume-range") {
     seriesTitle.textContent = "Probe-radius series";
-    appendTableRow(["Probe", "Volume", "Surface area", "Filled voxels"], true);
+    appendTableRow(["Layer", "Volume", "Surface area", "Filled voxels", "Offline map"], true);
     for (const point of result.points) {
-      appendTableRow([
-        `${point.probe.toFixed(2)} ${ANGSTROM}`,
+      const surface = requireViewerSurface(run, `probe-${point.probe.toFixed(6)}`);
+      const row = document.createElement("tr");
+      row.dataset["surfaceRow"] = surface.id;
+      const labelCell = document.createElement("td");
+      appendLayerLabel(labelCell, surface);
+      const values = [
         `${formatInteger(point.volume)} ${ANGSTROM_CUBED}`,
         `${formatInteger(point.surfaceArea)} ${ANGSTROM_SQUARED}`,
         formatInteger(point.voxelCount),
-      ]);
-    }
-    seriesNote.textContent = `The viewer and MRC download use the final ${result.representativeProbe.toFixed(2)} ${ANGSTROM} probe.`;
-  } else if (result.tool === "channel-finder") {
-    seriesTitle.textContent = "Ranked selected channels";
-    appendTableRow(["Rank", "Accessible volume", "Excluded volume", "Surface area"], true);
-    for (const component of result.components) {
-      const accessibleVolume = component.accessibleVoxelCount * result.gridSize ** 3;
-      appendTableRow([
-        String(component.rank),
-        `${formatInteger(accessibleVolume)} ${ANGSTROM_CUBED}`,
-        `${formatInteger(component.volume)} ${ANGSTROM_CUBED}`,
-        `${formatInteger(component.surfaceArea)} ${ANGSTROM_SQUARED}`,
-      ]);
+      ];
+      row.append(labelCell);
+      for (const value of values) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      const downloadCell = document.createElement("td");
+      appendLayerDownload(downloadCell, surface);
+      row.append(downloadCell);
+      seriesBody.append(row);
     }
     seriesNote.textContent =
-      `${result.matchedComponentCount} components matched; the largest ` +
-      `${result.selectedComponentCount} are combined in the viewer and MRC.`;
+      "All probe surfaces share one molecule and camera. Select a layer for its measurements.";
+  } else if (result.tool === "channel-finder") {
+    seriesTitle.textContent = "Ranked selected channels";
+    appendTableRow(["Layer", "Excluded volume", "Center of mass", "Offline map", "Continue"], true);
+    for (const component of result.components) {
+      const surface = requireViewerSurface(run, `channel-${component.rank}`);
+      const row = document.createElement("tr");
+      row.dataset["surfaceRow"] = surface.id;
+      const labelCell = document.createElement("td");
+      appendLayerLabel(labelCell, surface);
+      const volumeCell = document.createElement("td");
+      volumeCell.textContent = `${formatInteger(component.volume)} ${ANGSTROM_CUBED}`;
+      const centerCell = document.createElement("td");
+      centerCell.textContent =
+        `(${formatCoordinate(component.center.x)}, ${formatCoordinate(component.center.y)}, ` +
+        `${formatCoordinate(component.center.z)}) ${ANGSTROM}`;
+      const downloadCell = document.createElement("td");
+      appendLayerDownload(downloadCell, surface);
+      const handoffCell = document.createElement("td");
+      appendChannelHandoff(handoffCell, component);
+      row.append(labelCell, volumeCell, centerCell, downloadCell, handoffCell);
+      seriesBody.append(row);
+    }
+    seriesNote.textContent =
+      `${result.matchedComponentCount} components matched; ${result.selectedComponentCount} ` +
+      "are colored separately, with a combined union available in Surface layers.";
   }
+}
+
+function requireViewerSurface(run: CompletedRun, id: string): ViewerSurface {
+  const surface = run.viewerSurfaces.find((candidate) => candidate.id === id);
+  if (surface === undefined) {
+    throw new Error(`Viewer surface ${id} is missing from the completed result.`);
+  }
+  return surface;
+}
+
+function runSurfaceIndex(id: string): number {
+  const index = currentRun?.viewerSurfaces.findIndex((surface) => surface.id === id) ?? -1;
+  return Math.max(index, 0);
+}
+
+function setLayerVisibility(id: string, visible: boolean): void {
+  const rendered = renderedSurfaces.find((surface) => surface.artifact.id === id);
+  if (rendered !== undefined) {
+    rendered.visible = visible;
+    rendered.component?.setVisibility(surfaceToggle.checked && visible);
+  }
+  const checkbox = surfaceLayerList.querySelector<HTMLInputElement>(
+    `input[data-surface-visibility="${id}"]`,
+  );
+  if (checkbox !== null) {
+    checkbox.checked = visible;
+  }
+  updateViewerLayerState();
+}
+
+function showAllSurfaceLayers(): void {
+  const run = currentRun;
+  if (run === undefined) {
+    return;
+  }
+  surfaceToggle.checked = true;
+  for (const surface of run.viewerSurfaces) {
+    setLayerVisibility(surface.id, surface.kind !== "channel-union");
+  }
+  updateViewerVisibility();
+}
+
+function isolateSelectedSurface(): void {
+  const run = currentRun;
+  if (run === undefined || selectedSurfaceId === undefined) {
+    return;
+  }
+  surfaceToggle.checked = true;
+  for (const surface of run.viewerSurfaces) {
+    setLayerVisibility(surface.id, surface.id === selectedSurfaceId);
+  }
+  updateViewerVisibility();
+}
+
+function renderSelectedSurfaceDetails(run: CompletedRun, surface: ViewerSurface): void {
+  const result = run.result;
+  if (surface.kind === "probe" && result.tool === "volume-range") {
+    const point = result.points.find((candidate) => candidate.probe === surface.value);
+    if (point === undefined) {
+      throw new Error(`${surface.label} measurements are missing.`);
+    }
+    resultSummaryTitle.textContent = `${surface.label} information`;
+    renderMetrics(point);
+    setResultText("result-total-voxels", formatInteger(point.totalGridVoxels));
+    setResultText(
+      "result-grid",
+      `${point.dimensions.x} x ${point.dimensions.y} x ${point.dimensions.z}`,
+    );
+    resultProbeLabel.textContent = "Probe radius";
+    setResultText("result-probe", `${point.probe.toFixed(2)} ${ANGSTROM}`);
+    resultMethodLabel.textContent = "Layered surfaces";
+    setResultText("result-cavities", `${result.points.length} in this range`);
+    return;
+  }
+  if (surface.kind === "channel" && result.tool === "channel-finder") {
+    const component = result.components.find((candidate) => candidate.rank === surface.value);
+    if (component === undefined) {
+      throw new Error(`${surface.label} measurements are missing.`);
+    }
+    resultSummaryTitle.textContent = `${surface.label} information`;
+    renderMetrics(component);
+    resultProbeLabel.textContent = "Probe radii";
+    setResultText("result-probe", probeResultText(run));
+    resultMethodLabel.textContent = "Extractor coordinate";
+    setResultText(
+      "result-cavities",
+      `(${formatCoordinate(component.extractionCoordinate.x)}, ` +
+        `${formatCoordinate(component.extractionCoordinate.y)}, ` +
+        `${formatCoordinate(component.extractionCoordinate.z)}) ${ANGSTROM}`,
+    );
+    return;
+  }
+  resultSummaryTitle.textContent = TOOL_DEFINITIONS[result.tool].resultTitle;
+  renderMetrics(result);
+  setResultText("result-total-voxels", formatInteger(result.totalGridVoxels));
+  setResultText(
+    "result-grid",
+    `${result.dimensions.x} x ${result.dimensions.y} x ${result.dimensions.z}`,
+  );
+  setResultText("result-probe", probeResultText(run));
+  setResultText("result-cavities", methodResultText(result));
+  configureResultLabels(result);
+}
+
+function selectSurface(id: string): void {
+  const run = currentRun;
+  if (run === undefined) {
+    return;
+  }
+  const surface = requireViewerSurface(run, id);
+  selectedSurfaceId = id;
+  for (const item of surfaceLayerList.querySelectorAll<HTMLElement>("[data-surface-item]")) {
+    item.dataset["selected"] = String(item.dataset["surfaceItem"] === id);
+  }
+  for (const row of seriesBody.querySelectorAll<HTMLTableRowElement>("[data-surface-row]")) {
+    row.dataset["selected"] = String(row.dataset["surfaceRow"] === id);
+  }
+  viewerElement.dataset["selectedSurfaceId"] = id;
+  renderSelectedSurfaceDetails(run, surface);
+  updateSurfaceOpacity();
+}
+
+function renderLayerControls(run: CompletedRun): void {
+  surfaceLayerList.replaceChildren();
+  const isLayered = run.viewerSurfaces.length > 1;
+  surfaceLayerPanel.hidden = !isLayered;
+  surfaceLayerCount.textContent = `${run.viewerSurfaces.length} available`;
+  showAllSurfacesButton.textContent =
+    run.result.tool === "channel-finder" ? "Show channels" : "Show all";
+  if (!isLayered) {
+    selectedSurfaceId = run.viewerSurfaces[0]?.id;
+    return;
+  }
+  for (const [index, surface] of run.viewerSurfaces.entries()) {
+    const item = document.createElement("div");
+    item.className = "surface-layer-item";
+    item.dataset["surfaceItem"] = surface.id;
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = surface.initiallyVisible;
+    checkbox.dataset["surfaceVisibility"] = surface.id;
+    checkbox.setAttribute("aria-label", `Show ${surface.label}`);
+    checkbox.addEventListener("change", () => setLayerVisibility(surface.id, checkbox.checked));
+    const swatch = document.createElement("span");
+    swatch.className = "surface-swatch";
+    swatch.style.backgroundColor = surfaceColor(surface, index);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = surface.label;
+    button.addEventListener("click", () => selectSurface(surface.id));
+    item.append(checkbox, swatch, button);
+    surfaceLayerList.append(item);
+  }
+  const firstVisible = run.viewerSurfaces.find(
+    (surface) => surface.initiallyVisible && surface.kind !== "channel-union",
+  );
+  selectSurface(firstVisible?.id ?? run.viewerSurfaces[0]!.id);
+}
+
+function portChannelToExtractor(component: ChannelComponent): void {
+  const run = currentRun;
+  if (run === undefined || run.request.tool !== "channel-finder") {
+    return;
+  }
+  setInputValue("big-probe", String(run.request.bigProbe));
+  setInputValue("small-probe", String(run.request.smallProbe));
+  setInputValue("trim-probe", String(run.request.trimProbe));
+  setInputValue("grid-size", String(run.request.gridSize));
+  setInputValue("coordinate-x", String(component.extractionCoordinate.x));
+  setInputValue("coordinate-y", String(component.extractionCoordinate.y));
+  setInputValue("coordinate-z", String(component.extractionCoordinate.z));
+  requireElement<HTMLInputElement>("include-hetatm").checked = run.request.includeHetatm;
+  requireElement<HTMLInputElement>("exclude-water").checked = run.request.excludeWater;
+  window.location.hash = TOOL_DEFINITIONS.channel.hash;
 }
 
 function createDownload(id: string, blob: Blob, filename: string): void {
   const anchor = requireElement<HTMLAnchorElement>(id);
+  assignDownload(anchor, blob, filename);
+}
+
+function assignDownload(anchor: HTMLAnchorElement, blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   downloadUrls.push(url);
   anchor.href = url;
@@ -816,11 +1113,12 @@ function requestParameters(request: CalculationRequest): object {
 
 function csvText(result: VolumeRangeResult | ChannelFinderResult): string {
   if (result.tool === "volume-range") {
-    const rows = ["probe_A,volume_A3,surface_area_A2,filled_voxels,bounding_grid_voxels"];
-    for (const point of result.points) {
+    const rows = ["probe_A,color_hex,volume_A3,surface_area_A2,filled_voxels,bounding_grid_voxels"];
+    for (const [index, point] of result.points.entries()) {
       rows.push(
         [
           point.probe.toFixed(6),
+          VOLUME_RANGE_COLORS[index % VOLUME_RANGE_COLORS.length]!,
           point.volume.toFixed(6),
           point.surfaceArea.toFixed(6),
           String(point.voxelCount),
@@ -831,21 +1129,73 @@ function csvText(result: VolumeRangeResult | ChannelFinderResult): string {
     return `${rows.join("\n")}\n`;
   }
   const rows = [
-    "rank,accessible_voxels,accessible_volume_A3,excluded_voxels,excluded_volume_A3,surface_area_A2",
+    "rank,color_hex,accessible_voxels,accessible_volume_A3,excluded_voxels," +
+      "excluded_volume_A3,surface_area_A2,center_x_A,center_y_A,center_z_A," +
+      "extractor_x_A,extractor_y_A,extractor_z_A",
   ];
   for (const component of result.components) {
     rows.push(
       [
         String(component.rank),
+        CHANNEL_COLORS[(component.rank - 1) % CHANNEL_COLORS.length]!,
         String(component.accessibleVoxelCount),
         (component.accessibleVoxelCount * result.gridSize ** 3).toFixed(6),
         String(component.voxelCount),
         component.volume.toFixed(6),
         component.surfaceArea.toFixed(6),
+        component.center.x.toFixed(6),
+        component.center.y.toFixed(6),
+        component.center.z.toFixed(6),
+        component.extractionCoordinate.x.toFixed(6),
+        component.extractionCoordinate.y.toFixed(6),
+        component.extractionCoordinate.z.toFixed(6),
       ].join(","),
     );
   }
   return `${rows.join("\n")}\n`;
+}
+
+function surfaceDownloadFilename(
+  run: CompletedRun,
+  surface: ViewerSurface,
+  extension: "mrc" | "mrc.gz",
+): string {
+  const stem = resultStem(run.request);
+  if (surface.kind === "probe") {
+    return `${stem}-volume-range-probe-${surface.value.toFixed(2)}.${extension}`;
+  }
+  if (surface.kind === "channel") {
+    return `${stem}-channel-finder-channel-${String(surface.value).padStart(2, "0")}.${extension}`;
+  }
+  return `${stem}-${methodName(run.request)}.${extension}`;
+}
+
+async function wireSurfaceDownloads(run: CompletedRun): Promise<boolean> {
+  for (const surface of run.viewerSurfaces) {
+    if (surface.kind !== "probe" && surface.kind !== "channel") {
+      continue;
+    }
+    const anchor = seriesBody.querySelector<HTMLAnchorElement>(
+      `a[data-surface-download="${surface.id}"]`,
+    );
+    if (anchor === null) {
+      continue;
+    }
+    const rawMrc = new Blob([surface.downloadMrc], { type: "application/octet-stream" });
+    const compressedMrc = await gzipBlob(rawMrc);
+    if (currentRun !== run) {
+      return false;
+    }
+    if (compressedMrc === undefined) {
+      assignDownload(anchor, rawMrc, surfaceDownloadFilename(run, surface, "mrc"));
+      anchor.textContent = "MRC";
+    } else {
+      assignDownload(anchor, compressedMrc, surfaceDownloadFilename(run, surface, "mrc.gz"));
+      anchor.textContent = "MRC (.gz)";
+    }
+    anchor.setAttribute("aria-label", `Download ${surface.label} MRC density map`);
+  }
+  return true;
 }
 
 async function wireDownloads(run: CompletedRun): Promise<boolean> {
@@ -867,7 +1217,9 @@ async function wireDownloads(run: CompletedRun): Promise<boolean> {
   const mapDescription =
     run.result.tool === "channel-finder"
       ? "Combined occupancy map for the selected ranked channels"
-      : "Occupancy map for the displayed result";
+      : run.result.tool === "volume-range"
+        ? "Largest-probe occupancy map; every probe map is available in the series table"
+        : "Occupancy map for the displayed result";
   if (compressedMrc === undefined) {
     mrcLabel.textContent = "MRC density map";
     mrcDescription.textContent = `${mapDescription}; gzip is unavailable in this browser`;
@@ -877,11 +1229,23 @@ async function wireDownloads(run: CompletedRun): Promise<boolean> {
     mrcDescription.textContent = `${mapDescription}; decompress if required by your viewer`;
     createDownload("download-mrc", compressedMrc, `${stem}-${method}.mrc.gz`);
   }
+  if (!(await wireSurfaceDownloads(run))) {
+    return false;
+  }
   const report = {
     input: run.request.inputLabel,
     elapsedSeconds: run.elapsedSeconds,
     parameters: requestParameters(run.request),
     results: run.result,
+    viewerLayers: run.viewerSurfaces.map((surface, index) => ({
+      id: surface.id,
+      label: surface.label,
+      color: surfaceColor(surface, index),
+      initiallyVisible: surface.initiallyVisible,
+      download: seriesBody.querySelector<HTMLAnchorElement>(
+        `a[data-surface-download="${surface.id}"]`,
+      )?.download,
+    })),
   };
   createDownload(
     "download-json",
@@ -899,7 +1263,7 @@ async function wireDownloads(run: CompletedRun): Promise<boolean> {
   return true;
 }
 
-async function renderViewer(run: CompletedRun, preview: MrcPreview): Promise<boolean> {
+async function renderViewer(run: CompletedRun): Promise<boolean> {
   const viewerTheme = VIEWER_THEMES[currentTheme()];
   const renderStage = new Stage(viewerElement, {
     backgroundColor: viewerTheme.backgroundColor,
@@ -930,30 +1294,51 @@ async function renderViewer(run: CompletedRun, preview: MrcPreview): Promise<boo
     sele: "hetero and not water",
     colorScheme: "element",
   });
-  const loadedSurface = await renderStage.loadFile(
-    new Blob([preview.mrc], { type: "application/octet-stream" }),
-    { ext: "mrc", defaultRepresentation: false },
-  );
-  if (currentRun !== run) {
-    renderStage.dispose();
-    if (stage === renderStage) {
-      stage = undefined;
+  const placements: Record<string, string> = {};
+  renderedSurfaces = [];
+  for (const [index, artifact] of run.viewerSurfaces.entries()) {
+    const loadedSurface = await renderStage.loadFile(
+      new Blob([artifact.mrc], { type: "application/octet-stream" }),
+      { ext: "mrc", defaultRepresentation: false },
+    );
+    if (currentRun !== run) {
+      renderStage.dispose();
+      if (stage === renderStage) {
+        stage = undefined;
+      }
+      return false;
     }
-    return false;
+    if (loadedSurface === undefined) {
+      throw new Error(`NGL did not return the ${artifact.label} volume component.`);
+    }
+    placements[artifact.id] = verifyVolumePlacement(
+      loadedSurface.object as NglVolumeObject,
+      artifact,
+    );
+    const representation = loadedSurface.addRepresentation("surface", {
+      isolevel: artifact.isolevel,
+      color: surfaceColor(artifact, index),
+      opacity: Number(opacityInput.value),
+      depthWrite: false,
+      opaqueBack: false,
+      side: "double",
+    }) as RepresentationElement;
+    loadedSurface.setVisibility(artifact.initiallyVisible);
+    renderedSurfaces.push({
+      artifact,
+      component: loadedSurface,
+      representation,
+      color: surfaceColor(artifact, index),
+      visible: artifact.initiallyVisible,
+    });
+    artifact.mrc = new ArrayBuffer(0);
   }
-  if (loadedSurface === undefined) {
-    throw new Error("NGL did not return a volume component.");
+  if (run.result.tool === "volume-range") {
+    opacityInput.value = "0.15";
+  } else if (run.result.tool === "channel-finder") {
+    opacityInput.value = "0.42";
   }
-  surfaceComponent = loadedSurface;
-  verifyVolumePlacement(loadedSurface.object as NglVolumeObject, preview);
-  surfaceRepresentation = loadedSurface.addRepresentation("surface", {
-    isolevel: preview.isolevel,
-    color: viewerTheme.surfaceColor,
-    opacity: Number(opacityInput.value),
-    depthWrite: false,
-    opaqueBack: false,
-    side: "double",
-  }) as RepresentationElement;
+  viewerElement.dataset["surfaceOrigins"] = JSON.stringify(placements);
   applyViewerTheme(currentTheme());
   updateSurfaceOpacity();
   renderStage.autoView();
@@ -961,7 +1346,7 @@ async function renderViewer(run: CompletedRun, preview: MrcPreview): Promise<boo
   return true;
 }
 
-function verifyVolumePlacement(volume: NglVolumeObject, preview: MrcPreview): void {
+function verifyVolumePlacement(volume: NglVolumeObject, preview: ViewerSurface): string {
   const elements = volume.matrix?.elements;
   if (elements === undefined || elements.length < 16) {
     throw new Error("NGL did not expose the density-map placement matrix.");
@@ -973,6 +1358,7 @@ function verifyVolumePlacement(volume: NglVolumeObject, preview: MrcPreview): vo
     throw new Error("NGL placed the density map at coordinates that differ from the WASM result.");
   }
   viewerElement.dataset["volumeOrigin"] = parsedOrigin.join(",");
+  return parsedOrigin.join(",");
 }
 
 function applyViewerTheme(theme: Theme): void {
@@ -982,26 +1368,45 @@ function applyViewerTheme(theme: Theme): void {
     colorScheme: "chainname",
     colorScale: viewerTheme.chainColors,
   });
-  surfaceRepresentation?.setParameters({ color: viewerTheme.surfaceColor });
+  for (const [index, surface] of renderedSurfaces.entries()) {
+    surface.color = surfaceColor(surface.artifact, index);
+    surface.representation.setParameters({ color: surface.color });
+  }
   viewerElement.dataset["viewerTheme"] = theme;
   viewerElement.dataset["viewerBackground"] = viewerTheme.backgroundColor;
-  viewerElement.dataset["surfaceColor"] = viewerTheme.surfaceColor;
+  viewerElement.dataset["surfaceColors"] = renderedSurfaces
+    .map((surface) => surface.color)
+    .join(",");
   stage?.viewer.requestRender();
 }
 
 function updateViewerVisibility(): void {
   moleculeComponent?.setVisibility(moleculeToggle.checked);
-  surfaceComponent?.setVisibility(surfaceToggle.checked);
+  for (const surface of renderedSurfaces) {
+    surface.component?.setVisibility(surfaceToggle.checked && surface.visible);
+  }
+  updateViewerLayerState();
+}
+
+function updateViewerLayerState(): void {
+  const visibleCount = renderedSurfaces.filter(
+    (surface) => surfaceToggle.checked && surface.visible,
+  ).length;
+  viewerElement.dataset["surfaceCount"] = String(renderedSurfaces.length);
+  viewerElement.dataset["visibleSurfaceCount"] = String(visibleCount);
+  surfaceLayerCount.textContent = `${visibleCount} of ${renderedSurfaces.length} shown`;
+  stage?.viewer.requestRender();
 }
 
 function updateSurfaceOpacity(): void {
   const opacity = Number(opacityInput.value);
-  surfaceRepresentation?.setParameters({ opacity });
-  opacityOutput.value = `${Math.round(opacity * 100)}%`;
-  const appliedOpacity = surfaceRepresentation?.getParameters().opacity;
-  if (typeof appliedOpacity === "number") {
-    viewerElement.dataset["surfaceOpacity"] = String(appliedOpacity);
+  for (const surface of renderedSurfaces) {
+    const isSelected = renderedSurfaces.length > 1 && surface.artifact.id === selectedSurfaceId;
+    const appliedOpacity = isSelected ? Math.min(opacity + 0.18, 1) : opacity;
+    surface.representation.setParameters({ opacity: appliedOpacity });
   }
+  opacityOutput.value = `${Math.round(opacity * 100)}%`;
+  viewerElement.dataset["surfaceOpacity"] = String(opacity);
   stage?.viewer.requestRender();
 }
 
@@ -1009,9 +1414,9 @@ function resetViewer(): void {
   stage?.dispose();
   stage = undefined;
   moleculeComponent = undefined;
-  surfaceComponent = undefined;
   moleculeRepresentation = undefined;
-  surfaceRepresentation = undefined;
+  renderedSurfaces = [];
+  selectedSurfaceId = undefined;
   viewerElement.replaceChildren();
   for (const key of [
     "surfaceOpacity",
@@ -1019,7 +1424,11 @@ function resetViewer(): void {
     "previewBin",
     "viewerTheme",
     "viewerBackground",
-    "surfaceColor",
+    "surfaceColors",
+    "surfaceCount",
+    "visibleSurfaceCount",
+    "selectedSurfaceId",
+    "surfaceOrigins",
   ]) {
     delete viewerElement.dataset[key];
   }
@@ -1027,6 +1436,9 @@ function resetViewer(): void {
   moleculeToggle.checked = true;
   opacityInput.value = "0.35";
   opacityOutput.value = "35%";
+  surfaceLayerPanel.hidden = true;
+  surfaceLayerList.replaceChildren();
+  surfaceLayerCount.textContent = "";
   viewerResolution.textContent = "";
 }
 
@@ -1154,6 +1566,8 @@ retryButton.addEventListener("click", resetForNewCalculation);
 surfaceToggle.addEventListener("change", updateViewerVisibility);
 moleculeToggle.addEventListener("change", updateViewerVisibility);
 opacityInput.addEventListener("input", updateSurfaceOpacity);
+showAllSurfacesButton.addEventListener("click", showAllSurfaceLayers);
+isolateSurfaceButton.addEventListener("click", isolateSelectedSurface);
 recenterButton.addEventListener("click", () => stage?.autoView());
 fullscreenButton.addEventListener("click", () => {
   void viewerElement.requestFullscreen();

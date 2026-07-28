@@ -8,6 +8,14 @@ import { SMALL_PDB, openVolumeTool } from "./helper_volume";
 // - Input and calculation controls: src/index.html (#volume-form)
 // - Result input label: src/index.html (#result-input)
 
+test("Volume Range defaults to the six smoothing steps", async ({ page }) => {
+  await page.goto("/#volume-range");
+
+  await expect(page.getByLabel("Minimum probe radius")).toHaveValue("1");
+  await expect(page.getByLabel("Maximum probe radius")).toHaveValue("6");
+  await expect(page.getByLabel("Probe step")).toHaveValue("1");
+});
+
 test("RCSB input fetches an asymmetric unit and calculates it", async ({ page }) => {
   await page.route("https://files.rcsb.org/download/2LYZ.pdb", async (route) => {
     await route.fulfill({ body: SMALL_PDB, contentType: "chemical/x-pdb" });

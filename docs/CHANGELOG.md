@@ -32,6 +32,15 @@
 - Added browser-native gzip compression for MRC downloads with an uncompressed fallback.
 - Added adaptive, coordinate-preserving MRC binning for the NGL preview so maps above 8 million
   voxels do not expand directly into full-resolution `Float32Array` density data.
+- Added one shared, selectable surface-layer viewer for multi-volume results. Volume Range now
+  displays every probe step, while Channel Finder displays each ranked channel separately and
+  retains its combined union as an optional layer.
+- Added full-resolution, coordinate-preserving MRC downloads for every Volume Range step and every
+  selected Channel Finder component, with stable colors repeated in the viewer, tables, CSV, and
+  JSON report.
+- Added Channel Finder center-of-mass reporting and a direct "Extract this channel" handoff that
+  preserves the calculation inputs and seeds Single Channel Extraction at the nearest accessible
+  coordinate.
 - Ported the applicable 3vee-server Volume tooltips and restored the 50S ribosomal-subunit preset.
 - Restored the site landing page as the original 3vee external-volume and internal-volume tool
   selector, with Volume Calculation available and later ports identified explicitly.
@@ -50,9 +59,10 @@
 - Kept the browser calculation variables and operation order close to `vossvolvox-rust`; isolated
   browser-specific behavior to the C ABI, worker, sequential execution, combined map, and
   representative-map boundaries.
-- Represented a Volume Range as a complete numerical CSV/JSON series plus the final-probe MRC, and
-  represented Channel Finder as a ranked component table plus one combined MRC capped at 12
-  selected channels.
+- Changed the Volume Range default to the six 1 through 6 angstrom probe steps and represented the
+  result as six independently controlled surfaces plus their complete numerical series.
+- Kept Channel Finder's cap of 12 ranked components while replacing combined-only visualization
+  with individually controlled channel surfaces and an optional combined union.
 - Added "Very high - 0.40 A" and "Ultra - 0.25 A" grid choices while retaining 0.50 angstrom as
   the default, with approximate relative voxel costs shown beside the selector.
 - Removed hard minimum and maximum grid-spacing checks from WASM; any finite positive spacing is
@@ -128,6 +138,13 @@
   consolidated duplicated calculation teardown.
 - Replaced cancellation-test synchronization on Playwright's browser-specific `requestfailed`
   event with explicit routed-request lifecycle promises.
+- Cropped each per-channel MRC to its occupied bounds with padding and aligned dimensions while
+  preserving its original Cartesian placement, avoiding full-grid duplication without changing
+  offline coordinates.
+- Clarified the developer resource guidance that independently cropped Channel Finder layers make
+  multi-layer memory exhaustion a low-severity pathological risk rather than a routine cost.
+- Corrected the Channel Finder setup and README descriptions to identify the individual layers,
+  optional combined union, and six-step Volume Range default.
 
 ### Removals and Deprecations
 
@@ -156,6 +173,16 @@
   style; the README now documents the human activation move into `.github/workflows/`.
 - Retained 64 million voxels as an allocation ceiling, not a cross-browser reliability promise;
   a near-limit calculation plus NGL render remains unmeasured.
+- Kept all multi-volume surfaces in one NGL stage with one molecule and one camera. Separate viewer
+  windows would make direct smoothing and channel comparisons harder.
+- Kept MRC files format-standard and recorded the display color externally in layer labels,
+  swatches, CSV, and JSON because MRC occupancy maps do not carry a portable surface-color
+  convention.
+- A six-pass independent audit initially raised a high-severity multi-channel memory concern.
+  Follow-up inspection confirmed that each channel MRC is independently cropped with
+  coordinate-preserving origins, downgrading this to a low-severity pathological case involving
+  unusually large crops. The complete browser regression's ignored local 1JJ2 fixture remains a
+  separate test-portability limitation.
 
 ### Developer Tests and Notes
 
@@ -187,6 +214,11 @@
 - Added browser regression coverage for clearing NGL DOM and metadata on New calculation, all
   newly available tool routes, a three-point Volume Range with CSV and representative MRC, and a
   deterministic internal Solvent Extraction through production WASM.
+- Added Rust coverage for cropped channel-map coordinate preservation and safe extraction
+  coordinates, plus Playwright coverage for six-step defaults, layered surface controls,
+  per-layer MRC downloads, stable report colors, and Channel Finder handoff coordinates.
+- Confirmed all 7 Rust unit tests, 493 fast Python checks, 5 source checks, and 35 Playwright
+  browser tests pass against a fresh production build.
 - Refreshed the managed `tool_selector.png`, `volume_setup.png`, and `volume_results.png`
   documentation captures through `./tools/capture_readme_screenshots.sh`; the selector now records
   all six procedures as available.

@@ -990,6 +990,114 @@ hr {
   accent-color: var(--accent);
 }
 
+.surface-layer-panel {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 88%, var(--accent) 12%);
+}
+
+.surface-layer-heading,
+.surface-layer-heading > div,
+.surface-layer-actions,
+.surface-layer-list,
+.surface-layer-item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.surface-layer-heading {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.surface-layer-heading strong {
+  font-size: 0.82rem;
+}
+
+#surface-layer-count {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.surface-layer-actions button,
+.surface-layer-item button,
+.layer-action,
+.layer-download {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.surface-layer-actions button:hover,
+.surface-layer-item button:hover,
+.layer-action:hover,
+.layer-download:hover {
+  border-color: var(--accent);
+}
+
+.surface-layer-list {
+  flex-wrap: wrap;
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.surface-layer-item {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+}
+
+.surface-layer-item[data-selected="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.surface-layer-item input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+}
+
+.surface-swatch {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 1px solid rgb(255 255 255 / 55%);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 35%);
+}
+
+.surface-layer-item button {
+  min-height: 28px;
+  padding: 3px 7px;
+  border: 0;
+  background: transparent;
+}
+
+.results-table-card tr[data-selected="true"] {
+  background: color-mix(in srgb, var(--accent-dark) 55%, transparent);
+}
+
+.layer-label {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.layer-action,
+.layer-download {
+  display: inline-block;
+  white-space: nowrap;
+}
+
 #surface-opacity-value {
   min-width: 3ch;
   color: var(--ink);
@@ -1345,7 +1453,8 @@ hr {
   }
 
   .viewer-toolbar,
-  .viewer-toolbar > div {
+  .viewer-toolbar > div,
+  .surface-layer-heading {
     align-items: flex-start;
     flex-direction: column;
   }

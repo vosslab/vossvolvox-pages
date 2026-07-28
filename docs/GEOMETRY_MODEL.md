@@ -40,9 +40,14 @@ Solvent Extraction, Single Channel Extraction, and Channel Finder share the nati
    solvent-excluded output.
 
 Single Channel Extraction chooses the connected accessible component containing a Cartesian seed.
-Channel Finder ranks connected components by accessible voxel count, applies one size filter, and
-combines at most 12 selected excluded components into one browser MRC while retaining their
-individual measurements in CSV and JSON.
+Channel Finder ranks connected components by accessible voxel count and applies one size filter.
+For at most 12 selected components, it retains a combined union and creates a cropped,
+coordinate-preserving MRC for each excluded component. The shared viewer, CSV, and JSON use one
+stable rank-to-color mapping for those individual maps.
+
+The reported channel center is the center of mass of the excluded output volume. Because that
+center need not occupy an accessible voxel in an irregular channel, the direct Single Channel
+Extraction handoff uses the accessible component coordinate nearest the center instead.
 
 Exit Tunnel Extraction follows the native `Tunnel.exe` shell, channel, fixed-seed connectivity,
 probe-growth, and shell-intersection order. The fixed seeds originate in Dr. Neil Voss's PhD

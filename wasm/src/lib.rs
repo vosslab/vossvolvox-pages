@@ -48,6 +48,7 @@ thread_local! {
     static RESULT_JSON: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static RESULT_MRC: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static RESULT_PREVIEW_MRC: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static RESULT_LAYER_MRCS: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
 struct MrcHeader {
@@ -75,6 +76,7 @@ struct CalculationArtifacts {
     json: Vec<u8>,
     mrc: Vec<u8>,
     preview_mrc: Vec<u8>,
+    layer_mrcs: Vec<u8>,
 }
 
 struct GridMetrics {
@@ -99,6 +101,14 @@ struct ChannelSummary {
     voxel_count: usize,
     volume: f64,
     surface_area: f64,
+    sphericity: f64,
+    effective_radius: f64,
+    center: (f64, f64, f64),
+    extraction_coordinate: (f32, f32, f32),
+    mrc_offset: usize,
+    mrc_bytes: usize,
+    mrc_dimensions: [usize; 3],
+    mrc_origin: [f32; 3],
 }
 
 #[unsafe(no_mangle)]
@@ -135,12 +145,17 @@ pub unsafe extern "C" fn wasm_calculate(
 
     match calculation {
         Ok(artifacts) => {
-            store_results(artifacts.json, artifacts.mrc, artifacts.preview_mrc);
+            store_results(
+                artifacts.json,
+                artifacts.mrc,
+                artifacts.preview_mrc,
+                artifacts.layer_mrcs,
+            );
             0
         }
         Err(message) => {
             let json = format!("{{\"ok\":false,\"error\":\"{}\"}}", escape_json(&message));
-            store_results(json.into_bytes(), Vec::new(), Vec::new());
+            store_results(json.into_bytes(), Vec::new(), Vec::new(), Vec::new());
             1
         }
     }
@@ -187,12 +202,17 @@ pub unsafe extern "C" fn wasm_calculate_internal(
 
     match calculation {
         Ok(artifacts) => {
-            store_results(artifacts.json, artifacts.mrc, artifacts.preview_mrc);
+            store_results(
+                artifacts.json,
+                artifacts.mrc,
+                artifacts.preview_mrc,
+                artifacts.layer_mrcs,
+            );
             0
         }
         Err(message) => {
             let json = format!("{{\"ok\":false,\"error\":\"{}\"}}", escape_json(&message));
-            store_results(json.into_bytes(), Vec::new(), Vec::new());
+            store_results(json.into_bytes(), Vec::new(), Vec::new(), Vec::new());
             1
         }
     }
@@ -226,6 +246,16 @@ pub extern "C" fn wasm_preview_mrc_pointer() -> *const u8 {
 #[unsafe(no_mangle)]
 pub extern "C" fn wasm_preview_mrc_length() -> usize {
     RESULT_PREVIEW_MRC.with(|result| result.borrow().len())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wasm_layer_mrcs_pointer() -> *const u8 {
+    RESULT_LAYER_MRCS.with(|result| result.borrow().as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wasm_layer_mrcs_length() -> usize {
+    RESULT_LAYER_MRCS.with(|result| result.borrow().len())
 }
 
 fn calculate_volume(
@@ -274,6 +304,7 @@ fn calculate_volume(
         json: json.into_bytes(),
         mrc,
         preview_mrc: preview.bytes,
+        layer_mrcs: Vec::new(),
     })
 }
 
@@ -460,11 +491,18 @@ fn calculate_channel_finder(
     let selected = &selected[..selected.len().min(MAX_CHANNEL_RESULTS)];
     let mut union = params.build_grid();
     let mut summaries = Vec::<ChannelSummary>::new();
+    let mut layer_mrcs = Vec::<u8>::new();
     for (rank, (seed, accessible_voxels)) in selected.iter().enumerate() {
         let component = grids.accessible.connected_component(*seed);
         let mut excluded = component.grow_exclusion(small_probe);
         excluded.intersect(&grids.trim);
         let metrics = grid_metrics(&excluded)?;
+        let extraction_coordinate = closest_filled_coordinate(&component, metrics.center)?;
+        let cropped = crop_occupied_grid(&excluded)?;
+        let component_mrc = write_mrc_bytes(&cropped)?;
+        let mrc_offset = layer_mrcs.len();
+        let mrc_bytes = component_mrc.len();
+        layer_mrcs.extend_from_slice(&component_mrc);
         union.merge(&excluded);
         summaries.push(ChannelSummary {
             rank: rank + 1,
@@ -472,6 +510,14 @@ fn calculate_channel_finder(
             voxel_count: metrics.voxel_count,
             volume: metrics.volume,
             surface_area: metrics.surface_area,
+            sphericity: metrics.sphericity,
+            effective_radius: metrics.effective_radius,
+            center: metrics.center,
+            extraction_coordinate,
+            mrc_offset,
+            mrc_bytes,
+            mrc_dimensions: [cropped.len_i, cropped.len_j, cropped.len_k],
+            mrc_origin: [cropped.x_shift, cropped.y_shift, cropped.z_shift],
         });
     }
     let accessible_voxels = selected.iter().map(|candidate| candidate.1).sum();
@@ -487,7 +533,7 @@ fn calculate_channel_finder(
         summaries.len(),
         component_json,
     );
-    internal_artifacts(
+    let mut artifacts = internal_artifacts(
         "channel-finder",
         union,
         atoms.len(),
@@ -498,7 +544,9 @@ fn calculate_channel_finder(
         accessible_voxels,
         accessible_volume,
         &extra,
-    )
+    )?;
+    artifacts.layer_mrcs = layer_mrcs;
+    Ok(artifacts)
 }
 
 fn calculate_tunnel(
@@ -647,6 +695,7 @@ fn internal_artifacts(
         json: json.into_bytes(),
         mrc,
         preview_mrc: preview.bytes,
+        layer_mrcs: Vec::new(),
     })
 }
 
@@ -700,13 +749,35 @@ fn channel_summaries_json(summaries: &[ChannelSummary]) -> String {
             format!(
                 concat!(
                     "{{\"rank\":{},\"accessibleVoxelCount\":{},\"voxelCount\":{},",
-                    "\"volume\":{:.6},\"surfaceArea\":{:.6}}}"
+                    "\"volume\":{:.6},\"surfaceArea\":{:.6},",
+                    "\"sphericity\":{:.6},\"effectiveRadius\":{:.6},",
+                    "\"center\":{{\"x\":{:.6},\"y\":{:.6},\"z\":{:.6}}},",
+                    "\"extractionCoordinate\":{{\"x\":{:.6},\"y\":{:.6},\"z\":{:.6}}},",
+                    "\"mrcOffset\":{},\"mrcBytes\":{},",
+                    "\"mrcDimensions\":{{\"x\":{},\"y\":{},\"z\":{}}},",
+                    "\"mrcOrigin\":{{\"x\":{:.6},\"y\":{:.6},\"z\":{:.6}}}}}"
                 ),
                 summary.rank,
                 summary.accessible_voxels,
                 summary.voxel_count,
                 summary.volume,
                 summary.surface_area,
+                summary.sphericity,
+                summary.effective_radius,
+                summary.center.0,
+                summary.center.1,
+                summary.center.2,
+                summary.extraction_coordinate.0,
+                summary.extraction_coordinate.1,
+                summary.extraction_coordinate.2,
+                summary.mrc_offset,
+                summary.mrc_bytes,
+                summary.mrc_dimensions[0],
+                summary.mrc_dimensions[1],
+                summary.mrc_dimensions[2],
+                summary.mrc_origin[0],
+                summary.mrc_origin[1],
+                summary.mrc_origin[2],
             )
         })
         .collect::<Vec<_>>();
@@ -1031,6 +1102,60 @@ fn center_of_mass(grid: &Grid3D, voxel_count: usize) -> (f64, f64, f64) {
     (x, y, z)
 }
 
+fn closest_filled_coordinate(
+    grid: &Grid3D,
+    target: (f64, f64, f64),
+) -> Result<(f32, f32, f32), String> {
+    let mut closest = None::<(f64, (f32, f32, f32))>;
+    for index in grid.data.iter_ones() {
+        let (i, j, k) = grid.index_to_ijk(index);
+        let coordinate = (
+            (i as f32).mul_add(grid.grid_size, grid.x_shift),
+            (j as f32).mul_add(grid.grid_size, grid.y_shift),
+            (k as f32).mul_add(grid.grid_size, grid.z_shift),
+        );
+        let distance_squared = (f64::from(coordinate.0) - target.0).powi(2)
+            + (f64::from(coordinate.1) - target.1).powi(2)
+            + (f64::from(coordinate.2) - target.2).powi(2);
+        if closest.is_none_or(|current| distance_squared < current.0) {
+            closest = Some((distance_squared, coordinate));
+        }
+    }
+    closest
+        .map(|candidate| candidate.1)
+        .ok_or_else(|| "The channel has no accessible coordinate for extraction.".to_string())
+}
+
+fn crop_occupied_grid(grid: &Grid3D) -> Result<Grid3D, String> {
+    let (minimum, maximum) = grid
+        .occupied_bounds()
+        .ok_or_else(|| "The channel volume is empty and cannot be exported.".to_string())?;
+    let crop_min = (
+        minimum.0.saturating_sub(1),
+        minimum.1.saturating_sub(1),
+        minimum.2.saturating_sub(1),
+    );
+    let crop_max = (
+        (maximum.0 + 1).min(grid.len_i - 1),
+        (maximum.1 + 1).min(grid.len_j - 1),
+        (maximum.2 + 1).min(grid.len_k - 1),
+    );
+    let dimensions = [
+        (crop_max.0 - crop_min.0 + 1).div_ceil(4) * 4,
+        (crop_max.1 - crop_min.1 + 1).div_ceil(4) * 4,
+        (crop_max.2 - crop_min.2 + 1).div_ceil(4) * 4,
+    ];
+    let mut cropped = Grid3D::new(dimensions[0], dimensions[1], dimensions[2], grid.grid_size);
+    cropped.x_shift = (crop_min.0 as f32).mul_add(grid.grid_size, grid.x_shift);
+    cropped.y_shift = (crop_min.1 as f32).mul_add(grid.grid_size, grid.y_shift);
+    cropped.z_shift = (crop_min.2 as f32).mul_add(grid.grid_size, grid.z_shift);
+    for index in grid.data.iter_ones() {
+        let (i, j, k) = grid.index_to_ijk(index);
+        cropped.set_voxel_ijk(i - crop_min.0, j - crop_min.1, k - crop_min.2, true);
+    }
+    Ok(cropped)
+}
+
 fn write_mrc_bytes(grid: &Grid3D) -> Result<Vec<u8>, String> {
     // Preserve the native writer's guard plane/row after the declared MRC data.
     // Readers use NX*NY*NZ bytes and ignore this compatibility payload.
@@ -1269,10 +1394,11 @@ fn bounded_ceil(value: f32, length: usize) -> usize {
     (value.ceil() as isize).clamp(0, length as isize - 1) as usize
 }
 
-fn store_results(json: Vec<u8>, mrc: Vec<u8>, preview_mrc: Vec<u8>) {
+fn store_results(json: Vec<u8>, mrc: Vec<u8>, preview_mrc: Vec<u8>, layer_mrcs: Vec<u8>) {
     RESULT_JSON.with(|result| *result.borrow_mut() = json);
     RESULT_MRC.with(|result| *result.borrow_mut() = mrc);
     RESULT_PREVIEW_MRC.with(|result| *result.borrow_mut() = preview_mrc);
+    RESULT_LAYER_MRCS.with(|result| *result.borrow_mut() = layer_mrcs);
 }
 
 fn escape_json(text: &str) -> String {
@@ -1295,8 +1421,8 @@ fn escape_json(text: &str) -> String {
 mod tests {
     use super::{
         CHANNEL_FILTER_LARGEST, CHANNEL_FILTER_MINIMUM_PERCENT, CHANNEL_FILTER_MINIMUM_VOLUME,
-        MRC_HEADER_BYTES, fill_cavities_if_requested, select_channels, write_binned_preview_mrc,
-        write_preview_mrc,
+        MRC_HEADER_BYTES, closest_filled_coordinate, crop_occupied_grid,
+        fill_cavities_if_requested, select_channels, write_binned_preview_mrc, write_preview_mrc,
     };
     use vossvolvox::voxel_grid::grid::Grid3D;
 
@@ -1409,6 +1535,42 @@ mod tests {
             select_channels(&candidates, CHANNEL_FILTER_MINIMUM_PERCENT, 4.0, 1_000, 1.0,).unwrap(),
             vec![(3, 100), (7, 50)]
         );
+    }
+
+    #[test]
+    fn cropped_channel_map_preserves_coordinates_and_full_resolution() {
+        let mut grid = Grid3D::new(12, 12, 12, 0.5);
+        grid.x_shift = 10.0;
+        grid.y_shift = -20.0;
+        grid.z_shift = 30.0;
+        grid.set_voxel_ijk(4, 5, 6, true);
+        grid.set_voxel_ijk(5, 6, 7, true);
+
+        let cropped = crop_occupied_grid(&grid).unwrap();
+
+        assert_eq!([cropped.len_i, cropped.len_j, cropped.len_k], [4, 4, 4]);
+        assert_eq!(
+            [cropped.x_shift, cropped.y_shift, cropped.z_shift],
+            [11.5, -18.0, 32.5]
+        );
+        assert!(cropped.get_voxel_ijk(1, 1, 1));
+        assert!(cropped.get_voxel_ijk(2, 2, 2));
+    }
+
+    #[test]
+    fn extractor_coordinate_is_accessible_and_nearest_to_center() {
+        let mut grid = Grid3D::new(8, 8, 8, 1.0);
+        grid.x_shift = 10.0;
+        grid.set_voxel_ijk(1, 1, 1, true);
+        grid.set_voxel_ijk(5, 5, 5, true);
+
+        let coordinate = closest_filled_coordinate(&grid, (14.5, 14.5, 14.5)).unwrap();
+
+        assert_eq!(coordinate, (15.0, 5.0, 5.0));
+        let index = grid
+            .coordinate_index(coordinate.0, coordinate.1, coordinate.2)
+            .unwrap();
+        assert!(grid.get_voxel_index(index));
     }
 
     fn read_i32(bytes: &[u8], offset: usize) -> i32 {

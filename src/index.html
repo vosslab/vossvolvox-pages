@@ -11,12 +11,7 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <button
-      id="theme-toggle"
-      class="theme-toggle"
-      type="button"
-      aria-pressed="false"
-    >
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false">
       Light mode
     </button>
     <nav id="breadcrumbs" class="breadcrumbs page-shell" aria-label="Breadcrumb" hidden></nav>
@@ -244,14 +239,7 @@
                 <label for="minimum-probe" data-tool-controls="volume-range" hidden>
                   <span>Minimum probe radius</span>
                   <span class="unit-input">
-                    <input
-                      id="minimum-probe"
-                      type="number"
-                      value="0"
-                      min="0"
-                      max="20"
-                      step="0.1"
-                    />
+                    <input id="minimum-probe" type="number" value="1" min="0" max="20" step="0.1" />
                     <abbr title="angstrom">&Aring;</abbr>
                   </span>
                   <small>First rolling-probe radius in the series.</small>
@@ -260,14 +248,7 @@
                 <label for="maximum-probe" data-tool-controls="volume-range" hidden>
                   <span>Maximum probe radius</span>
                   <span class="unit-input">
-                    <input
-                      id="maximum-probe"
-                      type="number"
-                      value="6"
-                      min="0"
-                      max="20"
-                      step="0.1"
-                    />
+                    <input id="maximum-probe" type="number" value="6" min="0" max="20" step="0.1" />
                     <abbr title="angstrom">&Aring;</abbr>
                   </span>
                   <small>Last rolling-probe radius in the series.</small>
@@ -301,14 +282,7 @@
                     >
                   </span>
                   <span class="unit-input">
-                    <input
-                      id="big-probe"
-                      type="number"
-                      value="9"
-                      min="0.1"
-                      max="40"
-                      step="0.1"
-                    />
+                    <input id="big-probe" type="number" value="9" min="0.1" max="40" step="0.1" />
                     <abbr title="angstrom">&Aring;</abbr>
                   </span>
                   <small>Builds the outer molecular shell.</small>
@@ -326,14 +300,7 @@
                     >
                   </span>
                   <span class="unit-input">
-                    <input
-                      id="small-probe"
-                      type="number"
-                      value="1.5"
-                      min="0"
-                      max="40"
-                      step="0.1"
-                    />
+                    <input id="small-probe" type="number" value="1.5" min="0" max="40" step="0.1" />
                     <abbr title="angstrom">&Aring;</abbr>
                   </span>
                   <small>Defines which internal passages remain accessible.</small>
@@ -342,14 +309,7 @@
                 <label for="trim-probe" data-tool-controls="internal" hidden>
                   <span>Shell trim radius</span>
                   <span class="unit-input">
-                    <input
-                      id="trim-probe"
-                      type="number"
-                      value="1.5"
-                      min="0"
-                      max="20"
-                      step="0.1"
-                    />
+                    <input id="trim-probe" type="number" value="1.5" min="0" max="20" step="0.1" />
                     <abbr title="angstrom">&Aring;</abbr>
                   </span>
                   <small>Contracts the outer shell before solvent extraction.</small>
@@ -482,7 +442,10 @@
                     />
                   </label>
                 </div>
-                <small>At most 12 matching channels are combined into the browser result map.</small>
+                <small>
+                  At most 12 matching channels are shown as individual layers; their combined union
+                  remains available as an optional layer.
+                </small>
               </fieldset>
 
               <aside class="method-note" data-tool-controls="tunnel" hidden>
@@ -540,7 +503,7 @@
                   class="preset"
                   data-preset-id="2LYZ"
                   data-preset-grid="0.5"
-                  data-minimum-probe="0"
+                  data-minimum-probe="1"
                   data-maximum-probe="6"
                   data-probe-step="1"
                 >
@@ -619,7 +582,10 @@
           <section class="viewer-card">
             <div class="viewer-toolbar">
               <div>
-                <label><input id="surface-toggle" type="checkbox" checked /> Surface</label>
+                <label
+                  ><input id="surface-toggle" type="checkbox" checked />
+                  <span id="surface-toggle-label">Surface</span></label
+                >
                 <label><input id="molecule-toggle" type="checkbox" checked /> Molecule</label>
               </div>
               <div>
@@ -638,6 +604,23 @@
                 <button id="fullscreen-button" type="button">Fullscreen</button>
               </div>
             </div>
+            <section id="surface-layer-panel" class="surface-layer-panel" hidden>
+              <div class="surface-layer-heading">
+                <div>
+                  <strong>Surface layers</strong>
+                  <span id="surface-layer-count"></span>
+                </div>
+                <div class="surface-layer-actions">
+                  <button id="show-all-surfaces" type="button">Show all</button>
+                  <button id="isolate-surface" type="button">Isolate selected</button>
+                </div>
+              </div>
+              <div
+                id="surface-layer-list"
+                class="surface-layer-list"
+                aria-label="Calculated surface layers"
+              ></div>
+            </section>
             <div id="viewer" aria-label="Interactive molecule and volume surface"></div>
             <p class="viewer-help">
               Drag to rotate. Scroll to zoom. Right-drag to pan.

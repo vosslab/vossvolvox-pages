@@ -59,7 +59,19 @@ export type InternalRequest =
 
 export type CalculationRequest = VolumeRequest | VolumeRangeRequest | InternalRequest;
 
-type GridResult = {
+export type CartesianCoordinate = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type GridDimensions = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type GridResult = {
   ok: true;
   tool: ToolId;
   atomCount: number;
@@ -69,16 +81,16 @@ type GridResult = {
   surfaceArea: number;
   sphericity: number;
   effectiveRadius: number;
-  center: { x: number; y: number; z: number };
-  dimensions: { x: number; y: number; z: number };
-  origin: { x: number; y: number; z: number };
+  center: CartesianCoordinate;
+  dimensions: GridDimensions;
+  origin: CartesianCoordinate;
   gridSize: number;
   mrcBytes: number;
   previewBinFactor: 1 | 2;
   previewIsolevel: number;
   previewGridSize: number;
-  previewDimensions: { x: number; y: number; z: number };
-  previewOrigin: { x: number; y: number; z: number };
+  previewDimensions: GridDimensions;
+  previewOrigin: CartesianCoordinate;
   previewMrcBytes: number;
 };
 
@@ -93,8 +105,13 @@ export type VolumeRangePoint = {
   probe: number;
   volume: number;
   surfaceArea: number;
+  sphericity: number;
+  effectiveRadius: number;
+  center: CartesianCoordinate;
   voxelCount: number;
   totalGridVoxels: number;
+  dimensions: GridDimensions;
+  origin: CartesianCoordinate;
 };
 
 export type VolumeRangeResult = GridResult & {
@@ -130,6 +147,14 @@ export type ChannelComponent = {
   voxelCount: number;
   volume: number;
   surfaceArea: number;
+  sphericity: number;
+  effectiveRadius: number;
+  center: CartesianCoordinate;
+  extractionCoordinate: CartesianCoordinate;
+  mrcOffset: number;
+  mrcBytes: number;
+  mrcDimensions: GridDimensions;
+  mrcOrigin: CartesianCoordinate;
 };
 
 export type ChannelFinderResult = InternalResult & {
@@ -160,8 +185,19 @@ export type MrcPreview = {
   binFactor: 1 | 2;
   isolevel: number;
   spacing: number;
-  origin: { x: number; y: number; z: number };
-  dimensions: { x: number; y: number; z: number };
+  origin: CartesianCoordinate;
+  dimensions: GridDimensions;
+};
+
+export type ViewerSurfaceKind = "result" | "probe" | "channel" | "channel-union";
+
+export type ViewerSurface = MrcPreview & {
+  id: string;
+  label: string;
+  kind: ViewerSurfaceKind;
+  value: number;
+  downloadMrc: ArrayBuffer;
+  initiallyVisible: boolean;
 };
 
 export type CalculationFailure = {
@@ -183,7 +219,7 @@ export type WorkerSuccess = {
   type: "result";
   result: CalculationResult;
   mrc: ArrayBuffer;
-  previewMrc: ArrayBuffer;
+  viewerSurfaces: ViewerSurface[];
 };
 
 export type WorkerFailure = {

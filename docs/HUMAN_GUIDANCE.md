@@ -33,6 +33,15 @@ Durable project decisions for the browser implementation of 3vee tools.
   may evolve.
 - Preserve coordinate placement, physical extent, density normalization, and full-resolution
   numerical outputs when creating reduced visualization artifacts.
+- Preserve the identity of multi-volume results. Volume Range exists to compare every requested
+  smoothing step and defaults to probe radii 1 through 6; Channel Finder keeps each selected
+  channel distinct. Show those volumes as separately colored layers around one molecule in one
+  shared viewer rather than opening independent viewers.
+- Keep each displayed layer available as a coordinate-preserving MRC for offline analysis, and
+  repeat its stable color identity in the viewer, tables, CSV, and JSON metadata.
+- Report a Channel Finder output's true excluded-volume center of mass, but seed a direct Single
+  Channel Extraction handoff with the nearest coordinate in its accessible component because an
+  irregular volume's center may lie outside that component.
 
 ## Inputs and formats
 

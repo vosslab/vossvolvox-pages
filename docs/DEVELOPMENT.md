@@ -35,11 +35,17 @@ to the total `x * y * z` grid, not the number of filled molecular voxels.
   in browser memory.
 - NGL uses the full-resolution map through 8 million voxels, then displays a normalized bin-2
   preview. Numerical results and the downloaded map retain the selected grid.
+- Channel Finder does not retain one protein-sized MRC grid per result. Each selected channel is
+  cropped to its occupied bounds with one voxel of padding, its dimensions are aligned to
+  multiples of four, and its MRC origin is shifted to preserve the original Cartesian placement.
 - The browser also holds WebAssembly memory, input coordinates, result data, and NGL viewer data.
 
 The default 2LYZ calculation uses 1,444,352 bounding-grid positions, about 2.26% of the limit. The
 64-million value is an allocation ceiling, not a guarantee that every accepted job fits every
-browser and GPU.
+browser and GPU. The audit concern about multiple Channel Finder layers exhausting memory is
+therefore a low-severity pathological case rather than an expected cost of the shared viewer. A
+long channel can still have a large rectangular crop, and several unusually large full-resolution
+channel layers have no aggregate byte cap.
 
 ## Grid-size benchmarks
 

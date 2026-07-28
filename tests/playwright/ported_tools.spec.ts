@@ -1,5 +1,7 @@
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
@@ -70,7 +72,7 @@ test("Volume Calculation runs independently with a local PDB", async ({ page }) 
   );
 });
 
-test("Volume Range produces a numerical series and representative map", async ({ page }) => {
+test("Volume Range renders every probe as a controllable surface layer", async ({ page }) => {
   await page.goto("/#volume-range");
   await uploadInlinePdb(page, "range-example.pdb", SMALL_PDB);
   await page.getByLabel("Minimum probe radius").fill("0");
@@ -81,12 +83,30 @@ test("Volume Range produces a numerical series and representative map", async ({
 
   await expect(page.getByRole("heading", { name: "Probe-radius series" })).toBeVisible();
   await expect(page.locator("#series-body tr")).toHaveCount(3);
+  await expect(page.locator(".surface-layer-item")).toHaveCount(3);
+  await expect(page.locator("#viewer")).toHaveAttribute("data-surface-count", "3");
+  await expect(page.locator("#viewer")).toHaveAttribute("data-visible-surface-count", "3");
+  await expect(page.locator("#viewer")).toHaveAttribute(
+    "data-selected-surface-id",
+    "probe-0.000000",
+  );
   await expect(page.locator("#viewer")).toHaveAttribute("data-preview-bin", "1");
+  await expect(
+    page.getByRole("link", { name: "Download 0.00 \u00c5 probe MRC density map" }),
+  ).toHaveAttribute("download", "range-example-volume-range-probe-0.00.mrc.gz");
+  await page
+    .locator("#surface-layer-panel")
+    .getByRole("button", { name: "1.00 \u00c5 probe" })
+    .click();
+  await page.getByRole("button", { name: "Isolate selected" }).click();
+  await expect(page.locator("#viewer")).toHaveAttribute("data-visible-surface-count", "1");
+  await page.getByRole("button", { name: "Show all" }).click();
+  await expect(page.locator("#viewer")).toHaveAttribute("data-visible-surface-count", "3");
   await expect(page.getByRole("link", { name: /CSV table/ })).toHaveAttribute(
     "download",
     "range-example-volume-range-results.csv",
   );
-  await expect(page.getByRole("link", { name: /MRC density map/ })).toHaveAttribute(
+  await expect(page.locator("#download-mrc")).toHaveAttribute(
     "download",
     "range-example-volume-range.mrc.gz",
   );
@@ -99,11 +119,72 @@ test("Channel Finder runs independently with the local 1JJ2 reference", async ({
   await page.getByLabel("Value").fill("2");
   await page.getByRole("button", { name: "Find channels" }).click();
 
-  await expect(page.getByRole("heading", { name: "Selected channel union" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Channel 1 information" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Ranked selected channels" })).toBeVisible();
+  await expect(page.locator(".surface-layer-item")).toHaveCount(3);
+  await expect(page.locator("#viewer")).toHaveAttribute("data-surface-count", "3");
+  await expect(page.locator("#viewer")).toHaveAttribute("data-visible-surface-count", "2");
+  await expect(
+    page.getByRole("link", { name: "Download Channel 1 MRC density map" }),
+  ).toHaveAttribute("download", /1JJ2-channel-finder-channel-01\.mrc\.gz$/i);
   await expect(page.getByRole("link", { name: /CSV table/ })).toHaveAttribute(
     "download",
     /1JJ2-channel-finder-results\.csv$/i,
+  );
+
+  const report = await page.locator("#download-json").evaluate(async (element) => {
+    const response = await fetch((element as HTMLAnchorElement).href);
+    return (await response.json()) as {
+      results: {
+        components: Array<{
+          extractionCoordinate: { x: number; y: number; z: number };
+          mrcDimensions: { x: number; y: number; z: number };
+          mrcOrigin: { x: number; y: number; z: number };
+        }>;
+      };
+      viewerLayers: Array<{ id: string; color: string; download: string }>;
+    };
+  });
+  const firstComponent = report.results.components[0];
+  if (firstComponent === undefined) {
+    throw new Error("Channel Finder report did not include an extractor coordinate.");
+  }
+  expect(report.viewerLayers.find((layer) => layer.id === "channel-1")).toMatchObject({
+    color: "#159cb0",
+    download: expect.stringMatching(/channel-01\.mrc\.gz$/),
+  });
+  const channelDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("link", { name: "Download Channel 1 MRC density map" }).click();
+  const channelDownload = await channelDownloadPromise;
+  const channelPath = await channelDownload.path();
+  if (channelPath === null) {
+    throw new Error("Playwright did not provide the Channel 1 MRC download path.");
+  }
+  const channelMrc = gunzipSync(await readFile(channelPath));
+  expect(channelMrc.subarray(208, 212).toString("ascii")).toBe("MAP ");
+  expect([channelMrc.readInt32LE(0), channelMrc.readInt32LE(4), channelMrc.readInt32LE(8)]).toEqual(
+    [
+      firstComponent.mrcDimensions.x,
+      firstComponent.mrcDimensions.y,
+      firstComponent.mrcDimensions.z,
+    ],
+  );
+  expect([
+    channelMrc.readFloatLE(196),
+    channelMrc.readFloatLE(200),
+    channelMrc.readFloatLE(204),
+  ]).toEqual([firstComponent.mrcOrigin.x, firstComponent.mrcOrigin.y, firstComponent.mrcOrigin.z]);
+  await page.getByRole("button", { name: "Extract this channel" }).first().click();
+  await expect(page).toHaveURL(/#channel$/);
+  await expect(page.getByRole("heading", { name: "Single Channel Extraction" })).toBeVisible();
+  await expect(page.getByLabel("X", { exact: true })).toHaveValue(
+    String(firstComponent.extractionCoordinate.x),
+  );
+  await expect(page.getByLabel("Y", { exact: true })).toHaveValue(
+    String(firstComponent.extractionCoordinate.y),
+  );
+  await expect(page.getByLabel("Z", { exact: true })).toHaveValue(
+    String(firstComponent.extractionCoordinate.z),
   );
 });
 
